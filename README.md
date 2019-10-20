@@ -129,3 +129,6 @@ In case this is not what you were looking for, here are some other related proje
   * [description at eurobricks](https://www.eurobricks.com/forum/index.php?/forums/topic/137193-more-up-to-date-ldrawxml-lddldraw-conversion-file/)
   * [lxf2ldr](https://gitlab.com/sylvainls/lxf2ldr.html)
 
+-----------
+
+LEGO&reg; and the LEGO logo are registered trademarks of The Lego Group, which does not sponsor, endorse, or authorize this site. You can find the official LEGO website at http://www.lego.com.
