@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2019 Christoph Kubisch
+ * Copyright (c) 2019-2020 Christoph Kubisch
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -28,13 +28,17 @@
 #include "ldrawloader.h"
 
 #include <assert.h>
+
+#if LDR_CFG_THREADSAFE
 #include <atomic>
-#include <string>
+#include <mutex>
 #include <thread>
+#endif
+
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
 
 namespace ldr {
 
@@ -60,24 +64,23 @@ public:
 
   LdrResult registerShapeType(const char* filename, LdrShapeType type);
   LdrResult registerPrimitive(const char* filename, const LdrPart* part);
-  LdrResult registerPart(const char* filename, const LdrPart* part, LdrBool32 isFixed, LdrPartID* pPartID);
+  LdrResult registerPart(const char* filename, const LdrPart* part, LdrPartID* pPartID);
   LdrResult registerRenderPart(LdrPartID partid, const LdrRenderPart* rpart);
 
   LdrResult rawAllocate(size_t size, LdrRawData* raw);
   LdrResult rawFree(const LdrRawData* raw);
 
-  LdrResult fixParts(uint32_t numParts, const LdrPartID* parts, size_t partStride);
   LdrResult buildRenderParts(uint32_t numParts, const LdrPartID* parts, size_t partStride);
 
   LdrResult createModel(const char* filename, LdrBool32 autoResolve, LdrModelHDL* pModel);
+  void      destroyModel(LdrModelHDL model);
   // only required if autoResolve was false
   LdrResult resolveModel(LdrModelHDL model);
-  void      destroyModel(LdrModelHDL model);
 
   LdrResult createRenderModel(LdrModelHDL model, LdrBool32 autoResolve, LdrRenderModelHDL* pRenderModel);
   void      destroyRenderModel(LdrRenderModelHDL renderModel);
 
-  LdrResult loadDeferredParts(uint32_t numParts, const LdrPartID* parts, size_t partStride, LdrResult* pResults);
+  LdrResult loadDeferredParts(uint32_t numParts, const LdrPartID* parts, size_t partStride);
 
   inline const LdrMaterial&   getMaterial(LdrMaterialID idx) const { return m_materials[idx]; }
   inline const LdrPart&       getPart(LdrPartID idx) const { return m_parts[idx]; }
@@ -86,7 +89,9 @@ public:
 
   inline uint32_t getNumRegisteredParts() const
   {
-    SpinMutex::Scoped scopedLock(m_partRegistryMutex);
+#if LDR_CFG_THREADSAFE
+    std::lock_guard<std::mutex> lockguard(m_partRegistryMutex);
+#endif
     return (uint32_t)m_parts.size();
   }
 
@@ -141,31 +146,6 @@ private:
   // total number of search paths
   static const uint32_t SEARCH_PATHS = 4;
 
-  struct SpinMutex
-  {
-    std::atomic_flag m_lock = ATOMIC_FLAG_INIT;
-
-    void lock()
-    {
-      while(m_lock.test_and_set(std::memory_order_acquire)) {
-        std::this_thread::yield();
-      }
-    }
-    void unlock() { m_lock.clear(std::memory_order_release); }
-
-    class Scoped
-    {
-    public:
-      SpinMutex& m_mutex;
-      Scoped(SpinMutex& mutex)
-          : m_mutex(mutex)
-      {
-        mutex.lock();
-      }
-      ~Scoped() { m_mutex.unlock(); }
-    };
-  };
-
 #if 0
   template <typename T>
   using TVector = std::vector<T>;
@@ -184,7 +164,8 @@ private:
 
     void copy(const TVector<T>& other)
     {
-      if (!other.m_size) return;
+      if(!other.m_size)
+        return;
 
       reserve(other.m_size);
       memcpy(m_data, other.m_data, sizeof(T) * other.m_size);
@@ -240,12 +221,12 @@ private:
       }
       m_size = size;
     }
-    void clear(){ m_size = 0; };
+    void clear() { m_size = 0; };
     void reset()
     {
       if(m_data) {
         free(m_data);
-        m_data = nullptr;
+        m_data     = nullptr;
         m_capacity = 0;
         m_size     = 0;
       }
@@ -321,6 +302,7 @@ private:
       return (old & mask) != 0;
     }
 
+#if LDR_CFG_THREADSAFE
     bool getBit_ts(uint32_t idx, std::memory_order memorder = std::memory_order_relaxed) const
     {
       assert(idx <= num);
@@ -344,6 +326,7 @@ private:
       }
       return (old & mask) != 0;
     }
+#endif
   };
 
   enum BFCWinding
@@ -366,9 +349,9 @@ private:
 
   struct Text
   {
-    char*  buffer = nullptr;
-    size_t size   = 0;
-    bool   referenced  = false;
+    char*  buffer     = nullptr;
+    size_t size       = 0;
+    bool   referenced = false;
 
     ~Text()
     {
@@ -377,7 +360,8 @@ private:
       }
     }
 
-    bool load(const char* filename){
+    bool load(const char* filename)
+    {
       FILE* file = fopen(filename, "rb");
 
       if(!file)
@@ -391,8 +375,8 @@ private:
       fread(buffer, size, 1, file);
       fclose(file);
 
-      buffer[size] = '\n';
-      buffer[size+1] = 0;
+      buffer[size]     = '\n';
+      buffer[size + 1] = 0;
 
       size += 2;
 
@@ -437,8 +421,8 @@ private:
     LdrBbox              bbox = {{FLT_MAX, FLT_MAX, FLT_MAX}, {-FLT_MAX, -FLT_MAX, -FLT_MAX}};
     TVector<LdrInstance> instances;
 
-    std::vector<Text>         subTexts;
-    std::vector<std::string>  subFilenames;
+    std::vector<Text>        subTexts;
+    std::vector<std::string> subFilenames;
   };
 
   struct BuilderRenderPart
@@ -476,9 +460,9 @@ private:
 
   struct BuilderRenderModel
   {
-    LdrBbox                             bbox;
+    LdrBbox bbox;
     // builder instance is not POD hence don't use TVector
-    std::vector<BuilderRenderInstance>  instances;
+    std::vector<BuilderRenderInstance> instances;
   };
 
 
@@ -499,14 +483,18 @@ private:
   std::vector<std::string> m_partFoundnames;
   std::vector<std::string> m_primitiveFoundnames;
 
-  // flags if operations have started (completion may be manually managed or via resolves)
-  // m_finished bitarrays only exist in thread-safe variant
+  // flags for operation states
   BitArray m_startedPartLoad;
   BitArray m_startedPrimitiveLoad;
-  BitArray m_startedPartFix;
   BitArray m_startedPartRenderBuild;
 
-  mutable SpinMutex m_partRegistryMutex;
+#if LDR_CFG_THREADSAFE
+  BitArray m_finishedPartLoad;
+  BitArray m_finishedPrimitiveLoad;
+  BitArray m_finishedPartRenderBuild;
+
+  mutable std::mutex m_partRegistryMutex;
+#endif
 
   std::unordered_map<std::string, PartEntry>    m_partRegistry;
   std::unordered_map<std::string, LdrShapeType> m_shapeRegistry;
@@ -548,9 +536,10 @@ private:
   inline LdrResult findEntry(const char* filename, PartEntry& entry) const
   {
     LdrResult result = LDR_ERROR_OTHER;
-
-    SpinMutex::Scoped mutex(m_partRegistryMutex);
-    const auto        it = m_partRegistry.find(filename);
+#if LDR_CFG_THREADSAFE
+    std::lock_guard<std::mutex> lockguard(m_partRegistryMutex);
+#endif
+    const auto it = m_partRegistry.find(filename);
     if(it != m_partRegistry.cend()) {
       entry  = it->second;
       result = LDR_SUCCESS;
@@ -559,16 +548,25 @@ private:
     return result;
   }
 
-#if LDR_CFG_THREADSAFE_RESOLVES
+#if LDR_CFG_THREADSAFE
+  inline void startPrimitive(LdrPartID primID)
+  {
+    m_startedPrimitiveLoad.setBit_ts(primID, true, std::memory_order_release);
+  }
+  inline void startPart(LdrPartID partID) { m_startedPartLoad.setBit_ts(partID, true, std::memory_order_release); }
+  inline void startBuildRender(LdrPartID partID)
+  {
+    m_startedPartRenderBuild.setBit_ts(partID, true, std::memory_order_relaxed);
+  }
 
-  // flags that tell us if async operations completed
-  BitArray m_finishedPartLoad;
-  BitArray m_finishedPrimitiveLoad;
-  BitArray m_finishedPartFix;
-  BitArray m_finishedPartRenderBuild;
-
-  // FIXME not optimal to use busy hot loops here
-  // maybe expose as external virtual/function pointers
+  inline bool startPartAction(LdrPartID partID)
+  {
+    return !m_startedPartLoad.setBit_ts(partID, true, std::memory_order_acq_rel);
+  }
+  inline bool startBuildRenderAction(LdrPartID partID)
+  {
+    return !m_startedPartRenderBuild.setBit_ts(partID, true, std::memory_order_acq_rel);
+  }
 
   inline void signalPart(LdrPartID partid) { m_finishedPartLoad.setBit_ts(partid, true, std::memory_order_release); }
 
@@ -577,19 +575,11 @@ private:
     m_finishedPrimitiveLoad.setBit_ts(primid, true, std::memory_order_release);
   }
 
-  inline void signalFixed(LdrPartID partid) { m_finishedPartFix.setBit_ts(partid, true, std::memory_order_release); }
-
   inline void signalBuildRender(LdrPartID partid)
   {
     m_finishedPartRenderBuild.setBit_ts(partid, true, std::memory_order_release);
   }
 
-  inline void waitFixed(LdrPartID partid) const
-  {
-    while(!m_finishedPartFix.getBit_ts(partid, std::memory_order_acquire)) {
-      std::this_thread::yield();
-    }
-  }
 
   inline void waitBuildRender(LdrPartID partid) const
   {
@@ -612,21 +602,20 @@ private:
     }
   }
 #else
+  inline void startPrimitive(LdrPartID primID) { m_startedPrimitiveLoad.setBit(primID, true);}
+  inline void startPart(LdrPartID partID) { m_startedPartLoad.setBit(partID, true);}
+  inline void startBuildRender(LdrPartID partID) { m_startedPartRenderBuild.setBit(partID, true);}
+
+  inline bool startPartAction(LdrPartID partID) { return !m_startedPartLoad.setBit(partID, true);}
+  inline bool startBuildRenderAction(LdrPartID partID) {return !m_startedPartRenderBuild.setBit(partID, true); }
+
   inline void signalPart(LdrPartID partid) {}
-
-  inline void signalPrimitive(LdrPartID partid) {}
-
-  inline void signalFixed(LdrPartID partid) {}
-
+  inline void signalPrimitive(LdrPrimitiveID primid) {}
   inline void signalBuildRender(LdrPartID partid) {}
 
-  inline void waitFixed(LdrPartID partid) const {}
-
   inline void waitBuildRender(LdrPartID partid) const {}
-
   inline void waitPart(LdrPartID partid) const {}
-
-  inline void waitPrimitive(LdrPartID partid) const {}
+  inline void waitPrimitive(LdrPrimitiveID primid) const {}
 #endif
 };
 

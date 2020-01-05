@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2019 Christoph Kubisch
+ * Copyright (c) 2019-2020 Christoph Kubisch
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -29,15 +29,13 @@
 
 #include <stdint.h>
 
-// LDR_CFG_THREADSAFE_RESOLVES
+// LDR_CFG_THREADSAFE
 //  Enabled: you can load parts/models from multiple threads
-//  as well as build/fix them. The library will wait via yields
+//  as well as build renderparts. The library will wait via yields
 //  on depending operations to have completed.
-//
-//  Disabled: you can distribute manual part fixing
-//  and renderpart building across threads.
-#ifndef LDR_CFG_THREADSAFE_RESOLVES
-#define LDR_CFG_THREADSAFE_RESOLVES 1
+
+#ifndef LDR_CFG_THREADSAFE
+#define LDR_CFG_THREADSAFE 1
 #endif
 
 // LDR_CFG_C_API
@@ -96,7 +94,7 @@ extern "C" {
 #endif
 
 #define LDR_LOADER_VERSION_MAJOR 0
-#define LDR_LOADER_VERSION_MINOR 1
+#define LDR_LOADER_VERSION_MINOR 2
 #define LDR_LOADER_VERSION_CACHE 0
 
 #define LDR_INVALID_ID  (~0)
@@ -248,7 +246,7 @@ typedef struct LdrPartFlag
   // part can be chamfered (otherwise topology is too problematic)
   uint32_t canChamfer : 1;
   // had errors during fix operations
-  uint32_t fixErrors : 1;
+  uint32_t hasFixErrors : 1;
 } LdrPartFlag;
 
 
@@ -429,9 +427,8 @@ typedef enum LdrPartFixMode
   // It is required for building LdrRenderParts but can be done at their build time indirectly
   // or in advance on the LdrPart itself (in that case the original LdrPart topology is lost).
 
-  LDR_PART_FIX_NONE,    // part fixing is never applied to LdrParts
+  LDR_PART_FIX_NONE,    // part fixing is never applied to LdrParts (temp fix is triggered for renderbuild)
   LDR_PART_FIX_ONLOAD,  // part fixing is done at load time to LdrParts
-  LDR_PART_FIX_MANUAL,  // part fixing is managed manually through the function, but is done (LdrRenderPart building relies on this)
 } LdrPartFixMode;
 
 typedef enum LdrRenderPartBuildMode
@@ -451,7 +448,6 @@ typedef struct LdrLoaderCreateInfo
   LdrPartFixMode partFixMode;
   LdrBool32      partFixTjunctions;    // required for chamfer
   LdrBool32      partHiResPrimitives;  // substitutes with /p/48 if possible
-  //LdrBool32       renderpartLineStrips; // detect planar curves (NYI)
 
   LdrRenderPartBuildMode renderpartBuildMode;
 
@@ -468,9 +464,10 @@ LDR_API void      ldrDestroyLoader(LdrLoaderHDL loader);
 // override part with custom procedural type
 LDR_API LdrResult ldrRegisterShapeType(LdrLoaderHDL loader, const char* filename, LdrShapeType type);
 
-// override part with custom definition
+// override part with custom definitions
+// all overrides should be done prior any model creation operations
 // part.raw must be allocated by library and registration passes memory ownership to library
-LDR_API LdrResult ldrRegisterPart(LdrLoaderHDL loader, const char* filename, const LdrPart* part, LdrBool32 isFixed, LdrPartID* pPartID);
+LDR_API LdrResult ldrRegisterPart(LdrLoaderHDL loader, const char* filename, const LdrPart* part, LdrPartID* pPartID);
 LDR_API LdrResult ldrRegisterPrimitive(LdrLoaderHDL loader, const char* filename, const LdrPart* part);
 LDR_API LdrResult ldrRegisterRenderPart(LdrLoaderHDL loader, LdrPartID partId, const LdrRenderPart* part);
 // for custom overrides
@@ -479,28 +476,21 @@ LDR_API LdrResult ldrRawFree(LdrLoaderHDL loader, const LdrRawData* raw);
 
 // When "autoResolve" is used, all dependencies (part/primitive loading) are resolved automatically.
 // Without this we defer loading the actual parts and you must load them manually.
-// only thread-safe if LDR_CFG_THREADSAFE_RESOLVES is active
-
 LDR_API LdrResult ldrCreateModel(LdrLoaderHDL loader, const char* filename, LdrBool32 autoResolve, LdrModelHDL* pModel);
-// only required if autoResolve was false
-LDR_API void ldrResolveModel(LdrLoaderHDL loader, LdrModelHDL model);
 LDR_API void ldrDestroyModel(LdrLoaderHDL loader, LdrModelHDL model);
+// only required if autoResolve was false, all dependent deferred parts must have been loaded
+LDR_API void ldrResolveModel(LdrLoaderHDL loader, LdrModelHDL model);
 
+// When "autoResolve" is used, all dependencies (renderpart building) are resolved automatically.
 LDR_API LdrResult ldrCreateRenderModel(LdrLoaderHDL loader, LdrModelHDL model, LdrBool32 autoResolve, LdrRenderModelHDL* pRenderModel);
 LDR_API void ldrDestroyRenderModel(LdrLoaderHDL loader, LdrRenderModelHDL renderModel);
 
 // Use parts == nullptr to operate on all currently loaded parts (overrides numParts).
-// wait until all operations are completed (if threading is used)
-// thread-safe as long as parts are unique per thread, or if LDR_CFG_THREADSAFE_RESOLVES is used
-
-// only legal if LDR_PART_FIX_MANUAL
-LDR_API LdrResult ldrFixParts(LdrLoaderHDL loader, uint32_t numParts, const LdrPartID* parts, size_t partStride);
-
-// only legal if LDR_RENDERPART_BUILD_ONDEMAND
+// only legal for LDR_RENDERPART_BUILD_ONDEMAND
 LDR_API LdrResult ldrBuildRenderParts(LdrLoaderHDL loader, uint32_t numParts, const LdrPartID* parts, size_t partStride);
 
-// only thread-safe if LDR_CFG_THREADSAFE_RESOLVES is active, parts == nullptr then pResults must also be nullptr
-LDR_API LdrResult ldrLoadDeferredParts(LdrLoaderHDL loader, uint32_t numParts, const LdrPartID* parts, size_t partStride, LdrResult* pResults);
+// Use parts == nullptr to operate on all currently loaded parts (overrides numParts).
+LDR_API LdrResult ldrLoadDeferredParts(LdrLoaderHDL loader, uint32_t numParts, const LdrPartID* parts, size_t partStride);
 
 LDR_API LdrPartID ldrFindPart(LdrLoaderHDL loader, const char* filename);
 LDR_API LdrPrimitiveID ldrFindPrimitive(LdrLoaderHDL loader, const char* filename);
