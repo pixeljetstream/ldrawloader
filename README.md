@@ -132,4 +132,6 @@ In case this is not what you were looking for, here are some other related proje
 
 -----------
 
+LDraw&trade; is a trademark owned and licensed by the Estate of James Jessiman, which does not sponsor, endorse, or authorize this project.
+
 LEGO&reg; and the LEGO logo are registered trademarks of The Lego Group, which does not sponsor, endorse, or authorize this site. You can find the official LEGO website at http://www.lego.com.
