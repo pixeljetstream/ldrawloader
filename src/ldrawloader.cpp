@@ -195,6 +195,8 @@ const float Loader::NO_AREA_TRIANGLE_DOT = 0.9999f;
 const float Loader::FORCED_HARD_EDGE_DOT = 0.2f;
 const float Loader::CHAMFER_PARALLEL_DOT = 0.999f;
 const float Loader::ANGLE_45_DOT         = 0.7071f;
+const float Loader::MIN_MERGE_EPSILON    = 0.005f;
+
 
 template <class TvtxIndex_t, class TvtxIndexPair, int VTX_BITS, int VTX_TRIS>
 class TMesh
@@ -953,18 +955,18 @@ public:
 
         if(vec_dot(vec_normalize(normal[0]), vec_normalize(normal[1])) > Loader::ANGLE_45_DOT) {
           /*
-            "top down" view 
-            kept vertex is tip of normal direction, we split the "lower" vertex
+              "top down" view
+              kept vertex is tip of normal direction, we split the "lower" vertex
 
-            splitNew ____x
-                   |1\ L |         \ is non-manifold edge , L/R is left/right status 
-                   |R \  |                                  (could be flipped as well, but pairings are consistent)
-                   x__ kept ___x
-                         | \ R |       we pick a edge-triangle connected to a non-edge triangle, connected to kept
-                         |L \ 0|       that triangle (0) keeps the original vertex, the opposite triangle (1) has same L/R status
-                         x__ split     and gets the split vertex.
-                       
-          */
+              splitNew ____x
+                     |1\ L |         \ is non-manifold edge , L/R is left/right status
+                     |R \  |                                  (could be flipped as well, but pairings are consistent)
+                     x__ kept ___x
+                           | \ R |       we pick a edge-triangle connected to a non-edge triangle, connected to kept
+                           |L \ 0|       that triangle (0) keeps the original vertex, the opposite triangle (1) has same L/R status
+                           x__ split     and gets the split vertex.
+
+            */
 
 
           // split one vertex only
@@ -1844,7 +1846,7 @@ public:
           // from the last used edge (eStart) to get clusters ordered next
           // to each other.
 
-          uint32_t startIdx;
+          uint32_t startIdx   = ~0;
           uint32_t startRight = 0;
           for(uint32_t e = 0; e < edgeCount * 2; e++) {
             uint32_t eWrapped = (eStart * 2 + e) % (edgeCount * 2);
@@ -1853,6 +1855,12 @@ public:
               startRight = eWrapped % 2;
               break;
             }
+          }
+
+          if(startIdx == ~0) {
+            assert(0 && "TODO fix this case");
+            startIdx = startIdx;
+            break;
           }
 
           const MeshFull::Edge& startEdge = mesh.edges[edgeIndices[startIdx]];
@@ -2035,7 +2043,7 @@ LdrResult Loader::init(const LdrLoaderCreateInfo* createInfo)
     char* line = txt.buffer;
     for(size_t i = 0; i < txt.size; i++) {
       if(txt.buffer[i] == '\r')
-        txt.buffer[i] = ' ';
+        txt.buffer[i] = '\n';
       if(txt.buffer[i] != '\n')
         continue;
       txt.buffer[i] = 0;
@@ -2183,7 +2191,7 @@ LdrResult Loader::registerInternalPart(const char* filename, const std::string& 
 #if LDR_CFG_THREADSAFE
   std::lock_guard<std::mutex> lockguard(m_partRegistryMutex);
 #endif
-  PartEntry                   newentry;
+  PartEntry newentry;
   if(isPrimitive) {
     newentry.primID = m_primitives.size();
     if(newentry.primID == MAX_PRIMS) {
@@ -2238,7 +2246,7 @@ bool Loader::findLibraryFile(const char* filename, std::string& foundname, bool 
     if(f) {
       fclose(f);
       isPrimitive = i < PRIMITIVE_PATHS;
-      if(SUBPART_AS_PRIMITIVE && filename[0] == 's' && (filename[1] == '/' || filename[1] == '\\'))
+      if(allowPrimitives && SUBPART_AS_PRIMITIVE && filename[0] == 's' && (filename[1] == '/' || filename[1] == '\\'))
         isPrimitive = true;
       return true;
     }
@@ -2284,7 +2292,7 @@ LdrResult Loader::resolvePart(const char* filename, bool allowPrimitives, PartEn
   if(!found) {
     // try register
     std::string foundname;
-    bool        isPrimitive;
+    bool        isPrimitive = false;
     if(findLibraryFile(filename, foundname, allowPrimitives, isPrimitive)) {
       LdrResult result = registerInternalPart(filename, foundname, isPrimitive, true, entry);
       if(result == LDR_SUCCESS) {
@@ -2522,7 +2530,7 @@ LdrResult Loader::resolveModel(LdrModelHDL model)
   for(uint32_t i = 0; i < model->num_instances; i++) {
     const LdrInstance& instance = model->instances[i];
     const LdrPart&     part     = getPart(instance.part);
-    if (part.loadResult != LDR_SUCCESS) {
+    if(part.loadResult != LDR_SUCCESS) {
       result = part.loadResult;
     }
 
@@ -2597,14 +2605,19 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
   bool         invertNext     = false;
   bool         keepInvertNext = false;
 
+  std::string subfilenameLong;
+  char        subfilenameShort[512] = {0};
+
   char* line = txt.buffer;
   for(size_t i = 0; i < txt.size; i++) {
     if(txt.buffer[i] == '\r')
-      txt.buffer[i] = ' ';
+      txt.buffer[i] = '\n';
     if(txt.buffer[i] != '\n')
       continue;
 
     txt.buffer[i] = 0;
+
+    size_t lineLength = &txt.buffer[i] - line;
 
     // parse line
 
@@ -2654,9 +2667,13 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         mat[3] = mat[7] = mat[11] = 0;
         mat[15]                   = 1.0f;
 
-        char subfilename[512] = {0};
+        char* subfilename = subfilenameShort;
+        if(lineLength >= sizeof(subfilenameShort)) {
+          subfilenameLong = std::string(lineLength, 0);
+          subfilename     = &subfilenameLong[0];
+        }
 
-        int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f %f %f %f %511s", &dummy, &material, mat + 12, mat + 13,
+        int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f %f %f %f %[^\n\t]", &dummy, &material, mat + 12, mat + 13,
                           mat + 14, mat + 0, mat + 4, mat + 8, mat + 1, mat + 5, mat + 9, mat + 2, mat + 6, mat + 10, subfilename);
 
         if(read != 15) {
@@ -2679,8 +2696,11 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           PartEntry entry;
           LdrResult result = resolvePart(subfilename, true, entry);
           if(result == LDR_SUCCESS) {
-            if(entry.isPrimitive() || m_parts[entry.partID].flag.isSubpart) {
+            if(entry.isPrimitive()) {
               appendBuilderPrimitive(builder, transform, entry.primID, material, invertNext);
+            }
+            else if(m_parts[entry.partID].flag.isSubpart) {
+              appendBuilderSubPart(builder, transform, entry.partID, material, invertNext);
             }
             else {
               appendBuilderPart(builder, transform, entry.partID, material, invertNext);
@@ -2876,13 +2896,18 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
 {
   LdrResult finalResult = LDR_SUCCESS;
 
+  std::string subfilenameLong;
+  char        subfilenameShort[512] = {0};
+
   char* line = txt.buffer;
   for(size_t i = 0; i < txt.size; i++) {
     if(txt.buffer[i] == '\r')
-      txt.buffer[i] = ' ';
+      txt.buffer[i] = '\n';
     if(txt.buffer[i] != '\n')
       continue;
     txt.buffer[i] = 0;
+
+    size_t lineLength = &txt.buffer[i] - line;
 
     // parse line
     int typ = atoi(line);
@@ -2894,9 +2919,15 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
       mat[3] = mat[7] = mat[11] = 0;
       mat[15]                   = 1.0f;
 
-      char subfilename[512] = {0};
-      int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f %f %f %f %511s", &typ, &instance.material, mat + 12, mat + 13,
-                        mat + 14, mat + 0, mat + 4, mat + 8, mat + 1, mat + 5, mat + 9, mat + 2, mat + 6, mat + 10, subfilename);
+      char* subfilename = subfilenameShort;
+      if(lineLength >= sizeof(subfilenameShort)) {
+        subfilenameLong = std::string(lineLength, 0);
+        subfilename     = &subfilenameLong[0];
+      }
+
+      int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f %f %f %f %[^\n\t]", &typ, &instance.material, mat + 12,
+                        mat + 13, mat + 14, mat + 0, mat + 4, mat + 8, mat + 1, mat + 5, mat + 9, mat + 2, mat + 6,
+                        mat + 10, subfilename);
 
       instance.transform = mat_mul(transform, instance.transform);
       if(instance.material == LDR_MATERIALID_INHERIT) {
@@ -2971,6 +3002,9 @@ LdrResult Loader::loadModel(LdrModel& model, const char* filename, LdrBool32 aut
     return LDR_ERROR_FILE_NOT_FOUND;
   }
 
+  std::string subfilenameLong;
+  char        subfilenameShort[512] = {0};
+
   BuilderModel builder;
   // split into sub-texts
   bool isMpd = false;
@@ -2984,17 +3018,25 @@ LdrResult Loader::loadModel(LdrModel& model, const char* filename, LdrBool32 aut
 
     for(size_t i = 0; i < txt.size; i++) {
       if(txt.buffer[i] == '\r')
-        txt.buffer[i] = ' ';
+        txt.buffer[i] = '\n';
       if(txt.buffer[i] != '\n')
         continue;
       txt.buffer[i] = 0;
+
+      size_t lineLength = &txt.buffer[i] - line;
 
       // parse line
       int typ = atoi(line);
 
       if(typ == 0) {
-        char subfilename[512] = {0};
-        int  read             = sscanf(line, "0 FILE %511s", subfilename);
+
+        char* subfilename = subfilenameShort;
+        if(lineLength >= sizeof(subfilenameShort)) {
+          subfilenameLong = std::string(lineLength, 0);
+          subfilename     = &subfilenameLong[0];
+        }
+
+        int read = sscanf(line, "0 FILE %[^\n\t]", subfilename);
         if(read == 1) {
           if(nextFileBegin && nextFileBegin != line) {
             Text subTxt;
@@ -3290,8 +3332,16 @@ void Loader::appendBuilderPart(BuilderPart& builder, const LdrMatrix& transform,
 
 void Loader::appendBuilderPrimitive(BuilderPart& builder, const LdrMatrix& transform, LdrPrimitiveID primid, LdrMaterialID material, bool flipWinding)
 {
-  const LdrPart& part = m_primitives[primid];
+  appendBuilderEmbed(builder, transform, m_primitives[primid], material, flipWinding);
+}
 
+void Loader::appendBuilderSubPart(BuilderPart& builder, const LdrMatrix& transform, LdrPartID partid, LdrMaterialID material, bool flipWinding)
+{
+  appendBuilderEmbed(builder, transform, m_parts[partid], material, flipWinding);
+}
+
+void Loader::appendBuilderEmbed(BuilderPart& builder, const LdrMatrix& transform, const LdrPart& part, LdrMaterialID material, bool flipWinding)
+{
   builder.flag.hasComplexMaterial |= part.flag.hasComplexMaterial;
   builder.flag.hasNoBackFaceCulling |= part.flag.hasNoBackFaceCulling;
 
@@ -3419,9 +3469,8 @@ void Loader::compactBuilderPart(BuilderPart& builder)
 
   std::sort(sortedVertices.begin(), sortedVertices.end(), SortVertex_cmp);
 
-  // 1 LDU ~ 0.4mm
   // merge using minimal edge length
-  const float epsilon = builder.minEdgeLength * 0.9;
+  const float epsilon = std::min(MIN_MERGE_EPSILON, builder.minEdgeLength * 0.9f);
 
   // line sweep merge
   size_t     mergeBegin = 1;
@@ -3459,20 +3508,20 @@ void Loader::compactBuilderPart(BuilderPart& builder)
 #if _DEBUG
   printf("ldraw compaction: %d\n", uint32_t(numVertices - numVerticesNew));
 #if 0
-  float minDist = FLT_MAX;
+    float minDist = FLT_MAX;
 
-  for(size_t i = 0; i < numVerticesNew; i++)
-  {
-    for(size_t v = i + 1; v < numVerticesNew; v++)
+    for (size_t i = 0; i < numVerticesNew; i++)
     {
-      float sqlen = vec_sq_length( vec_sub(builder.positions[i] , builder.positions[v]));
-      if (sqlen <= epsilon * epsilon){
-        i = i;
+      for (size_t v = i + 1; v < numVerticesNew; v++)
+      {
+        float sqlen = vec_sq_length(vec_sub(builder.positions[i], builder.positions[v]));
+        if (sqlen <= epsilon * epsilon) {
+          i = i;
+        }
+        minDist = std::min(minDist, sqlen);
       }
-      minDist = std::min(minDist, sqlen);
     }
-  }
-  minDist = sqrtf(minDist);
+    minDist = sqrtf(minDist);
 #endif
 #endif
 

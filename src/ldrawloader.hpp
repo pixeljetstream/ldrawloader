@@ -137,6 +137,8 @@ private:
   static const float FORCED_HARD_EDGE_DOT;
   static const float CHAMFER_PARALLEL_DOT;
   static const float ANGLE_45_DOT;
+  // 1 LDU ~ 0.4mm
+  static const float MIN_MERGE_EPSILON;
 
   static const uint32_t MAX_PARTS = 16384;
   static const uint32_t MAX_PRIMS = 8192;
@@ -514,7 +516,11 @@ private:
 
   LdrResult appendSubModel(BuilderModel& builder, Text& text, const LdrMatrix& transform, LdrMaterialID material, LdrBool32 autoResolve);
 
+  void appendBuilderEmbed(BuilderPart& builder, const LdrMatrix& transform, const LdrPart& part, LdrMaterialID material, bool flipWinding);
+
   void appendBuilderPrimitive(BuilderPart& builder, const LdrMatrix& transform, LdrPrimitiveID primid, LdrMaterialID material, bool flipWinding);
+  void appendBuilderSubPart(BuilderPart& builder, const LdrMatrix& transform, LdrPartID partid, LdrMaterialID material, bool flipWinding);
+
   void appendBuilderPart(BuilderPart& builder, const LdrMatrix& transform, LdrPartID partid, LdrMaterialID material, bool flipWinding);
   void compactBuilderPart(BuilderPart& builder);
 
