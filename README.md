@@ -125,6 +125,7 @@ In case this is not what you were looking for, here are some other related proje
 
 * Blender Importer https://github.com/TobyLobster/ImportLDraw
 * three.js Loader https://threejs.org/examples/webgl_loader_ldraw.html 
+* weldr ldr to glTF 2.0 converter https://github.com/djeedai/weldr
 * LDD to LDR conversion, for example:
   * [description at eurobricks](https://www.eurobricks.com/forum/index.php?/forums/topic/137193-more-up-to-date-ldrawxml-lddldraw-conversion-file/)
   * [lxf2ldr](https://gitlab.com/sylvainls/lxf2ldr.html)
