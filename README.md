@@ -103,6 +103,10 @@ ldrDestroyModel(m_loader, m_scene.model);
 
 ```
 
+# Debugging / OpenGL Viewer
+
+[ldrawloader_viewer](https://github.com/pixeljetstream/ldrawloader_viewer) is a supplementary project that is used to debug this library.
+
 # Not a "Complete" Solution
 LDraw&trade; has many features and enhancements of various complexity (animation, grouping, deformable parts etc.). Some of those
 features may be added over time, however the goal of the project is mostly to provide easy-to-embed loader for basic use-cases.
