@@ -2892,7 +2892,7 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
 }
 
 
-LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatrix& transform, LdrMaterialID material, LdrBool32 autoResolve)
+LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatrix& transform, LdrMaterialID material, LdrBool32 autoResolve, uint32_t depth)
 {
   LdrResult finalResult = LDR_SUCCESS;
 
@@ -2939,8 +2939,9 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
         bool found = false;
         for(size_t i = 0; i < builder.subFilenames.size(); i++) {
           if(builder.subFilenames[i] == std::string(subfilename)) {
-            LdrResult result = appendSubModel(builder, builder.subTexts[i], instance.transform, instance.material, autoResolve);
+            LdrResult result = appendSubModel(builder, builder.subTexts[i], instance.transform, instance.material, autoResolve, depth + 1);
             if(result == LDR_SUCCESS) {
+              found = true;
             }
             else if(result == LDR_WARNING_PART_NOT_FOUND || result == LDR_ERROR_FILE_NOT_FOUND) {
               finalResult = LDR_WARNING_PART_NOT_FOUND;
@@ -3069,7 +3070,7 @@ LdrResult Loader::loadModel(LdrModel& model, const char* filename, LdrBool32 aut
   }
 
   LdrMatrix transform = mat_identity();
-  LdrResult finalResult = appendSubModel(builder, isMpd ? builder.subTexts[0] : txt, transform, LDR_MATERIAL_COMMON, autoResolve);
+  LdrResult finalResult = appendSubModel(builder, isMpd ? builder.subTexts[0] : txt, transform, LDR_MATERIALID_INHERIT, autoResolve, 0);
 
   initModel(model, builder);
   return finalResult;

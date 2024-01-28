@@ -514,7 +514,7 @@ private:
   LdrResult loadModel(LdrModel& model, const char* filename, LdrBool32 autoResolve);
   LdrResult makeRenderModel(LdrRenderModel& rmodel, LdrModelHDL model, LdrBool32 autoResolve);
 
-  LdrResult appendSubModel(BuilderModel& builder, Text& text, const LdrMatrix& transform, LdrMaterialID material, LdrBool32 autoResolve);
+  LdrResult appendSubModel(BuilderModel& builder, Text& text, const LdrMatrix& transform, LdrMaterialID material, LdrBool32 autoResolve, uint32_t depth);
 
   void appendBuilderEmbed(BuilderPart& builder, const LdrMatrix& transform, const LdrPart& part, LdrMaterialID material, bool flipWinding);
 
