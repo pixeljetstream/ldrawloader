@@ -195,7 +195,7 @@ const float Loader::NO_AREA_TRIANGLE_DOT = 0.9999f;
 const float Loader::FORCED_HARD_EDGE_DOT = 0.2f;
 const float Loader::CHAMFER_PARALLEL_DOT = 0.999f;
 const float Loader::ANGLE_45_DOT         = 0.7071f;
-const float Loader::MIN_MERGE_EPSILON    = 0.005f;
+const float Loader::MIN_MERGE_EPSILON    = 0.005f;  // 1 LDU ~ 0.4mm
 
 
 template <class TvtxIndex_t, class TvtxIndexPair, int VTX_BITS, int VTX_TRIS>
@@ -595,20 +595,6 @@ public:
     return INVALID;
   }
 
-  inline bool checkNoArea(uint32_t t, const LdrVector* pos)
-  {
-    uint32_t idxA = triangles[t * 3 + 0];
-    uint32_t idxB = triangles[t * 3 + 1];
-    uint32_t idxC = triangles[t * 3 + 2];
-
-    LdrVector vecA = pos[idxA];
-    LdrVector vecB = pos[idxB];
-    LdrVector vecC = pos[idxC];
-
-    float dot = fabsf(vec_dot(vec_normalize(vec_sub(vecB, vecA)), vec_normalize(vec_sub(vecC, vecA))));
-    return dot > Loader::NO_AREA_TRIANGLE_DOT;
-  }
-
   inline uint32_t checkNonManifoldTriangle(uint32_t t, uint32_t vtx[2])
   {
     uint32_t idxA = triangles[t * 3 + 0];
@@ -639,9 +625,12 @@ public:
 
   inline uint32_t checkNonManifoldQuad(uint32_t t, uint32_t vtx[2])
   {
+    // quad could be 0,1,2  2,3,0
+    //            or 0,1,3  2,3,1
+
     uint32_t idxA = triangles[t * 3 + 0];
     uint32_t idxB = triangles[t * 3 + 1];
-    uint32_t idxC = triangles[t * 3 + 2];
+    uint32_t idxC = triangles[t * 3 + 3];
     uint32_t idxD = triangles[t * 3 + 4];
 
     uint32_t edge = isEdgeClosed(idxA, idxB);
@@ -2558,9 +2547,10 @@ LdrResult Loader::resolveModel(LdrModelHDL model)
 
 void Loader::destroyModel(LdrModelHDL model)
 {
-  deinitModel(*(LdrModel*)model);
-
-  delete(LdrModel*)model;
+  if(model) {
+    deinitModel(*(LdrModel*)model);
+    delete(LdrModel*)model;
+  }
 }
 
 LdrResult Loader::createRenderModel(LdrModelHDL model, LdrBool32 autoResolve, LdrRenderModelHDL* pRenderModel)
@@ -2580,8 +2570,10 @@ LdrResult Loader::createRenderModel(LdrModelHDL model, LdrBool32 autoResolve, Ld
 
 void Loader::destroyRenderModel(LdrRenderModelHDL renderModel)
 {
-  deinitRenderModel(*(LdrRenderModel*)renderModel);
-  delete(LdrRenderModel*)renderModel;
+  if(renderModel) {
+    deinitRenderModel(*(LdrRenderModel*)renderModel);
+    delete(LdrRenderModel*)renderModel;
+  }
 }
 
 LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char* filename, bool isPrimitive)
@@ -2747,8 +2739,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           return part.loadResult;
         }
 
-        float dot = fabsf(vec_dot(vec_normalize(vec_sub(vecB, vecA)), vec_normalize(vec_sub(vecC, vecA))));
-        if(dot <= Loader::NO_AREA_TRIANGLE_DOT) {
+        float dotA = fabsf(vec_dot(vec_normalize(vec_sub(vecB, vecA)), vec_normalize(vec_sub(vecC, vecA))));
+        if(dotA <= Loader::NO_AREA_TRIANGLE_DOT) {
           uint32_t vidx = (uint32_t)builder.positions.size();
           // normalize to ccw
           if(winding == BFC_CW) {
@@ -2786,26 +2778,37 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           part.loadResult = LDR_ERROR_PARSER;
           return part.loadResult;
         }
-        float dot = fabsf(vec_dot(vec_normalize(vec_sub(vecB, vecA)), vec_normalize(vec_sub(vecC, vecA))));
-        if(dot <= Loader::NO_AREA_TRIANGLE_DOT) {
+        float dotA = fabsf(vec_dot(vec_normalize(vec_sub(vecB, vecA)), vec_normalize(vec_sub(vecC, vecA))));
+        float dotD = fabsf(vec_dot(vec_normalize(vec_sub(vecA, vecD)), vec_normalize(vec_sub(vecC, vecD))));
+        if(dotA <= Loader::NO_AREA_TRIANGLE_DOT || dotD <= Loader::NO_AREA_TRIANGLE_DOT) {
           uint32_t vidx = (uint32_t)builder.positions.size();
           uint32_t tidx = (uint32_t)builder.triangles.size() / 3;
+
+          // flip edge based on angles
+
+          uint32_t quad[6] = {0, 1, 2, 2, 3, 0};
+
+          if(Loader::ALLOW_QUAD_EDGEFLIP && dotD < dotA) {
+            quad[2] = 3;
+            quad[5] = 1;
+          }
+
           // normalize to ccw
           if(winding == BFC_CW) {
-            builder.triangles.push_back(vidx + 0);
-            builder.triangles.push_back(vidx + 3);
-            builder.triangles.push_back(vidx + 2);
-            builder.triangles.push_back(vidx + 2);
-            builder.triangles.push_back(vidx + 1);
-            builder.triangles.push_back(vidx + 0);
+            builder.triangles.push_back(vidx + quad[5]);
+            builder.triangles.push_back(vidx + quad[4]);
+            builder.triangles.push_back(vidx + quad[3]);
+            builder.triangles.push_back(vidx + quad[2]);
+            builder.triangles.push_back(vidx + quad[1]);
+            builder.triangles.push_back(vidx + quad[0]);
           }
           else {
-            builder.triangles.push_back(vidx + 0);
-            builder.triangles.push_back(vidx + 1);
-            builder.triangles.push_back(vidx + 2);
-            builder.triangles.push_back(vidx + 2);
-            builder.triangles.push_back(vidx + 3);
-            builder.triangles.push_back(vidx + 0);
+            builder.triangles.push_back(vidx + quad[0]);
+            builder.triangles.push_back(vidx + quad[1]);
+            builder.triangles.push_back(vidx + quad[2]);
+            builder.triangles.push_back(vidx + quad[3]);
+            builder.triangles.push_back(vidx + quad[4]);
+            builder.triangles.push_back(vidx + quad[5]);
           }
           builder.positions.push_back(vecA);
           builder.positions.push_back(vecB);
@@ -2939,7 +2942,8 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
         bool found = false;
         for(size_t i = 0; i < builder.subFilenames.size(); i++) {
           if(builder.subFilenames[i] == std::string(subfilename)) {
-            LdrResult result = appendSubModel(builder, builder.subTexts[i], instance.transform, instance.material, autoResolve, depth + 1);
+            LdrResult result =
+                appendSubModel(builder, builder.subTexts[i], instance.transform, instance.material, autoResolve, depth + 1);
             if(result == LDR_SUCCESS) {
               found = true;
             }
@@ -3070,7 +3074,8 @@ LdrResult Loader::loadModel(LdrModel& model, const char* filename, LdrBool32 aut
   }
 
   LdrMatrix transform = mat_identity();
-  LdrResult finalResult = appendSubModel(builder, isMpd ? builder.subTexts[0] : txt, transform, LDR_MATERIALID_INHERIT, autoResolve, 0);
+  LdrResult finalResult =
+      appendSubModel(builder, isMpd ? builder.subTexts[0] : txt, transform, LDR_MATERIALID_INHERIT, autoResolve, 0);
 
   initModel(model, builder);
   return finalResult;
@@ -3447,8 +3452,8 @@ void Loader::compactBuilderPart(BuilderPart& builder)
   if(builder.positions.empty())
     return;
 
-  uint32_t* remapMerge   = new uint32_t[builder.positions.size()];
-  uint32_t* remapCompact = new uint32_t[builder.positions.size()];
+  TVector<uint32_t> remapMerge(builder.positions.size());
+  TVector<uint32_t> remapCompact(builder.positions.size());
 
   // algorithm inspired by http://www.assimp.org/
   // sort points along single direction, then line sweep merge
@@ -3480,7 +3485,7 @@ void Loader::compactBuilderPart(BuilderPart& builder)
   for(size_t i = 1; i < numVertices; i++) {
     const SortVertex& svertex = sortedVertices[i];
     while(mergeBegin <= i && ((svertex.dot - refVertex.dot > epsilon) || (i == numVertices - 1))) {
-      mergeBegin = runMerge(refVertex, sortedVertices.data(), mergeBegin, i, remapMerge, epsilon);
+      mergeBegin = runMerge(refVertex, sortedVertices.data(), mergeBegin, i, remapMerge.data(), epsilon);
     }
   }
 
@@ -3526,9 +3531,9 @@ void Loader::compactBuilderPart(BuilderPart& builder)
 #endif
 #endif
 
-  size_t lineSize     = Utils::applyRemap2(builder.lines.size(), builder.lines.data(), remapMerge);
-  size_t optionalSize = Utils::applyRemap2(builder.optional_lines.size(), builder.optional_lines.data(), remapMerge);
-  size_t triangleSize = Utils::applyRemap3(builder.triangles.size(), builder.triangles.data(), remapMerge);
+  size_t lineSize = Utils::applyRemap2(builder.lines.size(), builder.lines.data(), remapMerge.data());
+  size_t optionalSize = Utils::applyRemap2(builder.optional_lines.size(), builder.optional_lines.data(), remapMerge.data());
+  size_t triangleSize = Utils::applyRemap3(builder.triangles.size(), builder.triangles.data(), remapMerge.data());
 
   builder.lines.resize(lineSize);
   builder.optional_lines.resize(optionalSize);
@@ -3799,9 +3804,11 @@ LDR_API LdrResult ldrCreateLoader(const LdrLoaderCreateInfo* info, LdrLoaderHDL*
 }
 LDR_API void ldrDestroyLoader(LdrLoaderHDL loader)
 {
-  ldr::Loader* lldr = (ldr::Loader*)loader;
-  lldr->deinit();
-  delete lldr;
+  if(loader) {
+    ldr::Loader* lldr = (ldr::Loader*)loader;
+    lldr->deinit();
+    delete lldr;
+  }
 }
 
 LDR_API LdrResult ldrRegisterShapeType(LdrLoaderHDL loader, const char* filename, LdrShapeType type)

@@ -137,7 +137,10 @@ private:
   static const float FORCED_HARD_EDGE_DOT;
   static const float CHAMFER_PARALLEL_DOT;
   static const float ANGLE_45_DOT;
-  // 1 LDU ~ 0.4mm
+
+  // still a bit buggy for renderparts/part fixing
+  static const bool ALLOW_QUAD_EDGEFLIP = false;
+  
   static const float MIN_MERGE_EPSILON;
 
   static const uint32_t MAX_PARTS = 16384;

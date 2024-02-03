@@ -459,7 +459,7 @@ typedef struct LdrLoaderCreateInfo
 #if LDR_CFG_C_API
 
 LDR_API LdrResult ldrCreateLoader(const LdrLoaderCreateInfo* info, LdrLoaderHDL* pLoader);
-LDR_API void      ldrDestroyLoader(LdrLoaderHDL loader);
+LDR_API void      ldrDestroyLoader(LdrLoaderHDL loader); // loader can be null
 
 // override part with custom procedural type
 LDR_API LdrResult ldrRegisterShapeType(LdrLoaderHDL loader, const char* filename, LdrShapeType type);
@@ -477,13 +477,13 @@ LDR_API LdrResult ldrRawFree(LdrLoaderHDL loader, const LdrRawData* raw);
 // When "autoResolve" is used, all dependencies (part/primitive loading) are resolved automatically.
 // Without this we defer loading the actual parts and you must load them manually.
 LDR_API LdrResult ldrCreateModel(LdrLoaderHDL loader, const char* filename, LdrBool32 autoResolve, LdrModelHDL* pModel);
-LDR_API void ldrDestroyModel(LdrLoaderHDL loader, LdrModelHDL model);
+LDR_API void ldrDestroyModel(LdrLoaderHDL loader, LdrModelHDL model); // model can be null
 // only required if autoResolve was false, all dependent deferred parts must have been loaded
 LDR_API void ldrResolveModel(LdrLoaderHDL loader, LdrModelHDL model);
 
 // When "autoResolve" is used, all dependencies (renderpart building) are resolved automatically.
 LDR_API LdrResult ldrCreateRenderModel(LdrLoaderHDL loader, LdrModelHDL model, LdrBool32 autoResolve, LdrRenderModelHDL* pRenderModel);
-LDR_API void ldrDestroyRenderModel(LdrLoaderHDL loader, LdrRenderModelHDL renderModel);
+LDR_API void ldrDestroyRenderModel(LdrLoaderHDL loader, LdrRenderModelHDL renderModel); // renderModel can be null
 
 // Use parts == nullptr to operate on all currently loaded parts (overrides numParts).
 // only legal for LDR_RENDERPART_BUILD_ONDEMAND
