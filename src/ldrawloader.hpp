@@ -95,6 +95,8 @@ public:
     return (uint32_t)m_parts.size();
   }
 
+  inline uint32_t getNumRegisteredMaterials() const { return (uint32_t)m_materials.size(); }
+
   inline LdrPartID findPart(const char* filename) const
   {
     LdrPartID id = LDR_INVALID_ID;
@@ -130,6 +132,9 @@ public:
 
 
 private:
+  static const uint32_t MATERIAL_ORIGINAL = 512;
+  static const uint32_t MATERIAL_CUSTOM   = 10000;
+
   // subpart are parts from parts/s directory
   static const bool SUBPART_AS_PRIMITIVE = true;
 
@@ -140,7 +145,7 @@ private:
 
   // still a bit buggy for renderparts/part fixing
   static const bool ALLOW_QUAD_EDGEFLIP = false;
-  
+
   static const float MIN_MERGE_EPSILON;
 
   static const uint32_t MAX_PARTS = 16384;
@@ -504,6 +509,18 @@ private:
   std::unordered_map<std::string, PartEntry>    m_partRegistry;
   std::unordered_map<std::string, LdrShapeType> m_shapeRegistry;
 
+  inline LdrMaterialID fixupMaterialID(LdrMaterialID m)
+  {
+    if(m < MATERIAL_ORIGINAL)
+      return m;
+    else if(m >= MATERIAL_CUSTOM)
+      return MATERIAL_ORIGINAL + (m - MATERIAL_CUSTOM);
+    else {
+      assert(0);
+      return 16;
+    }
+  }
+
 
   LdrResult registerInternalPart(const char* filename, const std::string& foundname, bool isPrimitive, bool startLoad, PartEntry& entry);
 
@@ -611,12 +628,12 @@ private:
     }
   }
 #else
-  inline void startPrimitive(LdrPartID primID) { m_startedPrimitiveLoad.setBit(primID, true);}
-  inline void startPart(LdrPartID partID) { m_startedPartLoad.setBit(partID, true);}
-  inline void startBuildRender(LdrPartID partID) { m_startedPartRenderBuild.setBit(partID, true);}
+  inline void startPrimitive(LdrPartID primID) { m_startedPrimitiveLoad.setBit(primID, true); }
+  inline void startPart(LdrPartID partID) { m_startedPartLoad.setBit(partID, true); }
+  inline void startBuildRender(LdrPartID partID) { m_startedPartRenderBuild.setBit(partID, true); }
 
-  inline bool startPartAction(LdrPartID partID) { return !m_startedPartLoad.setBit(partID, true);}
-  inline bool startBuildRenderAction(LdrPartID partID) {return !m_startedPartRenderBuild.setBit(partID, true); }
+  inline bool startPartAction(LdrPartID partID) { return !m_startedPartLoad.setBit(partID, true); }
+  inline bool startBuildRenderAction(LdrPartID partID) { return !m_startedPartRenderBuild.setBit(partID, true); }
 
   inline void signalPart(LdrPartID partid) {}
   inline void signalPrimitive(LdrPrimitiveID primid) {}

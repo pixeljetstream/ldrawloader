@@ -693,7 +693,21 @@ public:
     return nonManifold;
   }
 
-  inline void removeTriangle(uint32_t t)
+  inline uint32_t getTriangleEdgeFlags(uint32_t t, uint32_t e)
+  {
+    uint32_t vtxA = triangles[t * 3 + (e % 3)];
+    uint32_t vtxB = triangles[t * 3 + ((e + 1) % 3)];
+    return getEdge(vtxA, vtxB)->flag;
+  }
+
+  inline void setTriangleEdgeFlags(uint32_t t, uint32_t e, uint32_t flag)
+  {
+    uint32_t vtxA             = triangles[t * 3 + (e % 3)];
+    uint32_t vtxB             = triangles[t * 3 + ((e + 1) % 3)];
+    getEdge(vtxA, vtxB)->flag = flag;
+  }
+
+  inline void removeTriangle(uint32_t t, bool flagDead = true)
   {
     if(!triAlive.getBit(t))
       return;
@@ -711,8 +725,9 @@ public:
       vtxTriangles.remove(idxB, t);
       vtxTriangles.remove(idxC, t);
     }
-
-    triAlive.setBit(t, false);
+    if(flagDead) {
+      triAlive.setBit(t, false);
+    }
   }
 
   bool init(uint32_t numV, uint32_t numT, vtxIndex_t* tris)
@@ -868,10 +883,12 @@ public:
 
     Loader::TVector<LdrVector> triNormals;
     Loader::TVector<uint32_t>  triTemps;
+    Loader::TVector<uint32_t>  triTempEdgeFlags;
     Loader::TVector<uint32_t>  triDelete;
 
     triTemps.reserve(32);
     triNormals.reserve(32);
+    triTempEdgeFlags.reserve(32 * 3);
 
     for(uint32_t e = 0; e < mesh.numEdges; e++) {
       Mesh::Edge edge = mesh.edges[e];
@@ -1007,20 +1024,34 @@ public:
 
           // rebuild local triangles
           for(uint32_t s = 0; s < 4; s++) {
+            for(uint32_t te = 0; te < 3; te++) {
+              triTempEdgeFlags.push_back(mesh.getTriangleEdgeFlags(edgeTriangles[s], te));
+            }
             mesh.removeTriangle(edgeTriangles[s]);
           }
           mesh.replaceTriangleVertex(triOpposite, splitVtx, splitNew);
           mesh.replaceTriangleVertex(triOpposite2, splitVtx, splitNew);
 
           for(uint32_t t = 0; t < (uint32_t)triTemps.size(); t++) {
+            for(uint32_t te = 0; te < 3; te++) {
+              triTempEdgeFlags.push_back(mesh.getTriangleEdgeFlags(triTemps[t], te));
+            }
             mesh.removeTriangle(triTemps[t]);
             mesh.replaceTriangleVertex(triTemps[t], splitVtx, splitNew);
           }
           for(uint32_t s = 0; s < 4; s++) {
             mesh.addTriangle(edgeTriangles[s]);
+            if(!mesh.triAlive.getBit(edgeTriangles[s])) {
+              for(uint32_t te = 0; te < 3; te++) {
+                mesh.setTriangleEdgeFlags(edgeTriangles[s], te, triTempEdgeFlags[s * 3 + te]);
+              }
+            }
           }
           for(uint32_t t = 0; t < (uint32_t)triTemps.size(); t++) {
             mesh.addTriangle(triTemps[t]);
+            for(uint32_t te = 0; te < 3; te++) {
+              mesh.setTriangleEdgeFlags(triTemps[t], te, triTempEdgeFlags[(t + 4) * 3 + te]);
+            }
           }
         }
         else {
@@ -1064,13 +1095,17 @@ public:
         }
 
         for(uint32_t t = 0; t < (uint32_t)triTemps.size(); t++) {
+          for(uint32_t te = 0; te < 3; te++) {
+            triTempEdgeFlags.push_back(mesh.getTriangleEdgeFlags(triTemps[t], te));
+          }
           mesh.removeTriangle(triTemps[t]);
           mesh.replaceTriangleVertex(triTemps[t], edge.vtxA, newA);
           mesh.replaceTriangleVertex(triTemps[t], edge.vtxB, newB);
         }
         for(uint32_t t = 0; t < (uint32_t)triTemps.size(); t++) {
-          if(!mesh.triAlive.getBit(t)) {
-            mesh.addTriangle(triTemps[t]);
+          mesh.addTriangle(triTemps[t]);
+          for(uint32_t te = 0; te < 3; te++) {
+            mesh.setTriangleEdgeFlags(triTemps[t], te, triTempEdgeFlags[t * 3 + te]);
           }
         }
 
@@ -1078,6 +1113,7 @@ public:
       }
 
       triTemps.clear();
+      triTempEdgeFlags.clear();
     }
 
     for(size_t t = 0; t < triDelete.size(); t++) {
@@ -2082,6 +2118,8 @@ LdrResult Loader::init(const LdrLoaderCreateInfo* createInfo)
         material.edgeColor[0] = (edge >> 16) & 0xFF;
         uint32_t temp         = 0;
 
+        code = fixupMaterialID(code);
+
         const char* search = nullptr;
         search             = strstr(line, "ALPHA");
         if(search && 1 == sscanf(search, "ALPHA %d", &temp)) {
@@ -2673,6 +2711,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           return part.loadResult;
         }
 
+        material = fixupMaterialID(material);
+
         // find existing part/primitive
         LdrShapeType shapeType = m_shapeRegistry.empty() ? LDR_INVALID_ID : findShapeType(subfilename);
         if(shapeType != LDR_INVALID_ID) {
@@ -2717,6 +2757,9 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           part.loadResult = LDR_ERROR_PARSER;
           return part.loadResult;
         }
+
+        material = fixupMaterialID(material);
+
         uint32_t vidx = (uint32_t)builder.positions.size();
         builder.lines.push_back(vidx);
         builder.lines.push_back(vidx + 1);
@@ -2738,6 +2781,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           part.loadResult = LDR_ERROR_PARSER;
           return part.loadResult;
         }
+
+        material = fixupMaterialID(material);
 
         float dotA = fabsf(vec_dot(vec_normalize(vec_sub(vecB, vecA)), vec_normalize(vec_sub(vecC, vecA))));
         if(dotA <= Loader::NO_AREA_TRIANGLE_DOT) {
@@ -2778,6 +2823,9 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           part.loadResult = LDR_ERROR_PARSER;
           return part.loadResult;
         }
+
+        material = fixupMaterialID(material);
+
         float dotA = fabsf(vec_dot(vec_normalize(vec_sub(vecB, vecA)), vec_normalize(vec_sub(vecC, vecA))));
         float dotD = fabsf(vec_dot(vec_normalize(vec_sub(vecA, vecD)), vec_normalize(vec_sub(vecC, vecD))));
         if(dotA <= Loader::NO_AREA_TRIANGLE_DOT || dotD <= Loader::NO_AREA_TRIANGLE_DOT) {
@@ -2836,6 +2884,9 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           part.loadResult = LDR_ERROR_PARSER;
           return part.loadResult;
         }
+
+        material = fixupMaterialID(material);
+
         uint32_t vidx = (uint32_t)builder.positions.size();
         builder.optional_lines.push_back(vidx);
         builder.optional_lines.push_back(vidx + 1);
@@ -2931,6 +2982,8 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
       int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f %f %f %f %[^\n\t]", &typ, &instance.material, mat + 12,
                         mat + 13, mat + 14, mat + 0, mat + 4, mat + 8, mat + 1, mat + 5, mat + 9, mat + 2, mat + 6,
                         mat + 10, subfilename);
+
+      instance.material = fixupMaterialID(instance.material);
 
       instance.transform = mat_mul(transform, instance.transform);
       if(instance.material == LDR_MATERIALID_INHERIT) {
@@ -3906,6 +3959,12 @@ LDR_API uint32_t ldrGetNumRegisteredParts(LdrLoaderHDL loader)
   return lldr->getNumRegisteredParts();
 }
 
+LDR_API uint32_t ldrGetNumRegisteredMaterials(LdrLoaderHDL loader)
+{
+  ldr::Loader* lldr = (ldr::Loader*)loader;
+  return lldr->getNumRegisteredMaterials();
+}
+
 LDR_API const LdrMaterial* ldrGetMaterial(LdrLoaderHDL loader, LdrMaterialID idx)
 {
   ldr::Loader* lldr = (ldr::Loader*)loader;
@@ -3940,5 +3999,7 @@ LDR_API const LdrRenderPart* ldrGetRenderPart(LdrLoaderHDL loader, LdrPartID idx
 1 10 0 200 0 1 0 0 0 1 0 0 0 1 32278.dat
 1 10 0 240 0 1 0 0 0 1 0 0 0 1 32062.dat
 1 10 0 280 0 1 0 0 0 1 0 0 0 1 64782.dat
-1 10 0 320 0 1 0 0 0 1 0 0 0 1 92908.dat
+1 10 0 360 0 1 0 0 0 1 0 0 0 1 92908.dat
+1 10 0 480 0 1 0 0 0 1 0 0 0 1 3479.dat
+1 10 0 580 0 1 0 0 0 1 0 0 0 1 4079.dat
 */

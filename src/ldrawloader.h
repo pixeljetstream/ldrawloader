@@ -183,6 +183,8 @@ typedef struct LdrBbox
 
 //////////////////////////////////////////////////////////////////////////
 
+// materials with code >= 10000 are rebased and start at 512
+
 typedef enum LdrMaterialSpecial
 {
   LDR_MATERIALID_INHERIT = 16,
@@ -497,6 +499,8 @@ LDR_API LdrPrimitiveID ldrFindPrimitive(LdrLoaderHDL loader, const char* filenam
 
 // can be used to distribute part loading across threads if autoResolve is false on model create
 LDR_API uint32_t ldrGetNumRegisteredParts(LdrLoaderHDL loader);
+
+LDR_API uint32_t ldrGetNumRegisteredMaterials(LdrLoaderHDL loader);
 
 LDR_API const LdrMaterial* ldrGetMaterial(LdrLoaderHDL loader, LdrMaterialID idx);
 LDR_API const LdrPart* ldrGetPart(LdrLoaderHDL loader, LdrPartID idx);
