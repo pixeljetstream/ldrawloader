@@ -44,12 +44,6 @@
 #define LDR_CFG_C_API 1
 #endif
 
-// LdrVector is 128-bit wide, otherwise 96-bit
-// allocations of vectors/matrices are always 128-bit aligned
-#ifndef LDR_CFG_128BIT_VEC
-#define LDR_CFG_128BIT_VEC 0
-#endif
-
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,16 +88,16 @@ extern "C" {
 #endif
 
 #define LDR_LOADER_VERSION_MAJOR 0
-#define LDR_LOADER_VERSION_MINOR 2
+#define LDR_LOADER_VERSION_MINOR 3
 #define LDR_LOADER_VERSION_CACHE 0
 
-#define LDR_INVALID_ID  (~0)
+#define LDR_INVALID_ID (~0)
 #define LDR_INVALID_IDX (~0)
 #define LDR_INVALID_SHAPETYPE 0
 
 #define LDR_RESTRICT __restrict
 
-typedef enum LdrResult
+typedef enum LdrResult : int32_t
 {
   LDR_WARNING_IN_USE         = 2,
   LDR_WARNING_PART_NOT_FOUND = 1,
@@ -119,13 +113,13 @@ typedef enum LdrResult
   LDR_ERROR_OTHER               = -7,
 } LdrResult;
 
-typedef enum LdrBool32
+typedef enum LdrBool32 : uint32_t
 {
   LDR_FALSE = 0,
   LDR_TRUE  = 1,
 } LdrBool32;
 
-typedef enum LdrObjectType
+typedef enum LdrObjectType : uint32_t
 {
   LDR_OBJECT_PRIMITIVE,
   LDR_OBJECT_PART,
@@ -167,9 +161,6 @@ typedef struct LdrVector
       float x;
       float y;
       float z;
-#if LDR_CFG_128BIT_VEC
-      float _pad;
-#endif
     };
     float vec[3];
   };
@@ -185,13 +176,13 @@ typedef struct LdrBbox
 
 // materials with code >= 10000 are rebased and start at 512
 
-typedef enum LdrMaterialSpecial
+typedef enum LdrMaterialSpecial : uint32_t
 {
   LDR_MATERIALID_INHERIT = 16,
   LDR_MATERIALID_EDGE    = 24,
 } LdrMaterialSpecial;
 
-typedef enum LdrMaterialType
+typedef enum LdrMaterialType : uint32_t
 {
   LDR_MATERIAL_SOLID,
   LDR_MATERIAL_TRANSPARENT,
@@ -264,7 +255,7 @@ typedef struct LdrShape
   LdrShapeType  type;
   uint32_t      bfcInvert;
   LdrMaterialID material;
-  uint32_t      _pad;
+  uint32_t      _pad1;
   LdrMatrix     transform;
 } LdrShape;
 
@@ -277,7 +268,7 @@ typedef struct LdrInstance
   LdrMatrix     transform;
   LdrPartID     part;
   LdrMaterialID material;
-  uint32_t      _pad[2];  // for 16 byte aligned transform
+  uint32_t      _pad1[2];  // for 16 byte aligned transform
 } LdrInstance;
 
 // LdrParts represent the geometry of individual parts.
@@ -288,7 +279,7 @@ typedef struct LdrInstance
 
 typedef struct LdrPart
 {
-  LdrResult   loadResult;
+  LdrResult loadResult;
 
   LdrPartFlag flag;
   LdrBbox     bbox;
@@ -303,16 +294,16 @@ typedef struct LdrPart
   uint32_t num_name;
 
   // all pointers are within raw
-  LdrVector* LDR_RESTRICT       positions;
-  LdrVertexIndex* LDR_RESTRICT  lines;
-  LdrVertexIndex* LDR_RESTRICT  optional_lines;
-  LdrVertexIndex* LDR_RESTRICT  triangles;
-  LdrVertexIndex* LDR_RESTRICT  connections;  // per-vertex, if != ~0 means index of opposing non-manifold vertex split
-  LdrMaterialID* LDR_RESTRICT   materials;
-  uint32_t* LDR_RESTRICT        quads;  // per-traingle, if != ~0 means index of starting triangle
-  LdrShape* LDR_RESTRICT        shapes;
-  LdrInstance* LDR_RESTRICT     instances;  // sub-parts
-  char* LDR_RESTRICT            name;
+  LdrVector* LDR_RESTRICT      positions;
+  LdrVertexIndex* LDR_RESTRICT lines;
+  LdrVertexIndex* LDR_RESTRICT optional_lines;
+  LdrVertexIndex* LDR_RESTRICT triangles;
+  LdrVertexIndex* LDR_RESTRICT connections;  // per-vertex, if != ~0 means index of opposing non-manifold vertex split
+  LdrMaterialID* LDR_RESTRICT  materials;
+  uint32_t* LDR_RESTRICT       quads;  // per-traingle, if != ~0 means index of starting triangle
+  LdrShape* LDR_RESTRICT       shapes;
+  LdrInstance* LDR_RESTRICT    instances;  // sub-parts
+  char* LDR_RESTRICT           name;
 
   LdrRawData raw;
 } LdrPart;
@@ -336,8 +327,10 @@ typedef struct LdrModel
 
 typedef struct LdrRenderVertex
 {
-  LdrVector position;
-  LdrVector normal;
+  LdrVector     position;
+  //LdrMaterialID material; // validity depends on LdrLoaderCreateInfo::renderpartVertexMaterials
+  LdrVector     normal;
+  //uint32_t      _pad;
 } LdrRenderVertex;
 
 // LdrRenderPart is the renderable version of a (non-Primitive) LdrPart.
@@ -367,38 +360,21 @@ typedef struct LdrRenderPart
   LdrRenderVertex* LDR_RESTRICT vertices;
   LdrVertexIndex* LDR_RESTRICT  lines;
   //LdrVertexIndex* LDR_RESTRICT  linesC; // TODO
-  LdrVertexIndex* LDR_RESTRICT  triangles;
-  LdrVertexIndex* LDR_RESTRICT  trianglesC;
-  LdrMaterialID* LDR_RESTRICT   materials;
-  LdrMaterialID* LDR_RESTRICT   materialsC;
-  LdrShape* LDR_RESTRICT        shapes;
+  LdrVertexIndex* LDR_RESTRICT triangles;
+  LdrVertexIndex* LDR_RESTRICT trianglesC;
+  LdrMaterialID* LDR_RESTRICT  materials;
+  LdrMaterialID* LDR_RESTRICT  materialsC;
+  LdrShape* LDR_RESTRICT       shapes;
 
   LdrRawData raw;
 } LdrRenderPart;
 
 // LdrRenderInstance is used by the LdrModel
 // to represent all LdrRenderParts of that model.
-// Render instances may contain per-triangle material
-// overrides if required.
 
 typedef struct LdrRenderInstance
 {
   LdrInstance instance;
-
-  // all pointers are within parent raw
-
-  // C suffix stands for chamfered
-
-  // per-triangle material overrides, exist
-  // only if part has complex material, resolves LDR_MATERIALD_INHERIT
-  // into instance's material
-  LdrMaterialID* LDR_RESTRICT materials;
-  LdrMaterialID* LDR_RESTRICT materialsC;
-
-#if !(defined(_M_ARM64) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__))
-  // 32-bit padding to keep 16-byte alignment of instance
-  uint32_t _pad[2];
-#endif
 } LdrRenderInstance;
 
 // LdrRenderModel contains all information
@@ -423,20 +399,21 @@ typedef struct LdrLoader*     LdrLoaderHDL;
 typedef const LdrModel*       LdrModelHDL;
 typedef const LdrRenderModel* LdrRenderModelHDL;
 
-typedef enum LdrPartFixMode
+typedef enum LdrPartFixMode : uint32_t
 {
   // Part fixing involves resolving t-junction, non-manifold surfaces etc.
   // It is required for building LdrRenderParts but can be done at their build time indirectly
-  // or in advance on the LdrPart itself (in that case the original LdrPart topology is lost).
+  // or in advance on the LdrPart itself, in that case the original LdrPart topology is lost,
+  // hence not recommended.
 
   LDR_PART_FIX_NONE,    // part fixing is never applied to LdrParts (temp fix is triggered for renderbuild)
   LDR_PART_FIX_ONLOAD,  // part fixing is done at load time to LdrParts
 } LdrPartFixMode;
 
-typedef enum LdrRenderPartBuildMode
+typedef enum LdrRenderPartBuildMode : uint32_t
 {
   LDR_RENDERPART_BUILD_ONDEMAND,  // either via ldrBuildRenderParts or ldrCreateRenderModel with autoResolve
-  LDR_RENDERPART_BUILD_ONLOAD,    // done at load time
+  LDR_RENDERPART_BUILD_ONLOAD,    // done immediately at part load time
 } LdrRenderPartBuildMode;
 
 typedef struct LdrLoaderCreateInfo
@@ -451,6 +428,10 @@ typedef struct LdrLoaderCreateInfo
   LdrBool32      partFixTjunctions;    // required for chamfer
   LdrBool32      partHiResPrimitives;  // substitutes with /p/48 if possible
 
+  // TODO allow pervertex splits based on materials
+  //LdrBool32 renderpartTriangleMaterials;  // keeps triangle materials array
+  //LdrBool32 renderpartVertexMaterials;    // split vertices on material edges, not yet implemented
+
   LdrRenderPartBuildMode renderpartBuildMode;
 
   // chamfers hard edges if possible, only valid if partFixTjunctions was true
@@ -460,8 +441,10 @@ typedef struct LdrLoaderCreateInfo
 
 #if LDR_CFG_C_API
 
+LDR_API void ldrGetDefaultCreateInfo(LdrLoaderCreateInfo* info);
+
 LDR_API LdrResult ldrCreateLoader(const LdrLoaderCreateInfo* info, LdrLoaderHDL* pLoader);
-LDR_API void      ldrDestroyLoader(LdrLoaderHDL loader); // loader can be null
+LDR_API void      ldrDestroyLoader(LdrLoaderHDL loader);  // loader can be null
 
 // override part with custom procedural type
 LDR_API LdrResult ldrRegisterShapeType(LdrLoaderHDL loader, const char* filename, LdrShapeType type);
@@ -479,13 +462,13 @@ LDR_API LdrResult ldrRawFree(LdrLoaderHDL loader, const LdrRawData* raw);
 // When "autoResolve" is used, all dependencies (part/primitive loading) are resolved automatically.
 // Without this we defer loading the actual parts and you must load them manually.
 LDR_API LdrResult ldrCreateModel(LdrLoaderHDL loader, const char* filename, LdrBool32 autoResolve, LdrModelHDL* pModel);
-LDR_API void ldrDestroyModel(LdrLoaderHDL loader, LdrModelHDL model); // model can be null
+LDR_API void      ldrDestroyModel(LdrLoaderHDL loader, LdrModelHDL model);  // model can be null
 // only required if autoResolve was false, all dependent deferred parts must have been loaded
 LDR_API void ldrResolveModel(LdrLoaderHDL loader, LdrModelHDL model);
 
 // When "autoResolve" is used, all dependencies (renderpart building) are resolved automatically.
 LDR_API LdrResult ldrCreateRenderModel(LdrLoaderHDL loader, LdrModelHDL model, LdrBool32 autoResolve, LdrRenderModelHDL* pRenderModel);
-LDR_API void ldrDestroyRenderModel(LdrLoaderHDL loader, LdrRenderModelHDL renderModel); // renderModel can be null
+LDR_API void ldrDestroyRenderModel(LdrLoaderHDL loader, LdrRenderModelHDL renderModel);  // renderModel can be null
 
 // Use parts == nullptr to operate on all currently loaded parts (overrides numParts).
 // only legal for LDR_RENDERPART_BUILD_ONDEMAND
@@ -494,7 +477,7 @@ LDR_API LdrResult ldrBuildRenderParts(LdrLoaderHDL loader, uint32_t numParts, co
 // Use parts == nullptr to operate on all currently loaded parts (overrides numParts).
 LDR_API LdrResult ldrLoadDeferredParts(LdrLoaderHDL loader, uint32_t numParts, const LdrPartID* parts, size_t partStride);
 
-LDR_API LdrPartID ldrFindPart(LdrLoaderHDL loader, const char* filename);
+LDR_API LdrPartID      ldrFindPart(LdrLoaderHDL loader, const char* filename);
 LDR_API LdrPrimitiveID ldrFindPrimitive(LdrLoaderHDL loader, const char* filename);
 
 // can be used to distribute part loading across threads if autoResolve is false on model create
@@ -502,9 +485,9 @@ LDR_API uint32_t ldrGetNumRegisteredParts(LdrLoaderHDL loader);
 
 LDR_API uint32_t ldrGetNumRegisteredMaterials(LdrLoaderHDL loader);
 
-LDR_API const LdrMaterial* ldrGetMaterial(LdrLoaderHDL loader, LdrMaterialID idx);
-LDR_API const LdrPart* ldrGetPart(LdrLoaderHDL loader, LdrPartID idx);
-LDR_API const LdrPart* ldrGetPrimitive(LdrLoaderHDL loader, LdrPrimitiveID idx);
+LDR_API const LdrMaterial*   ldrGetMaterial(LdrLoaderHDL loader, LdrMaterialID idx);
+LDR_API const LdrPart*       ldrGetPart(LdrLoaderHDL loader, LdrPartID idx);
+LDR_API const LdrPart*       ldrGetPrimitive(LdrLoaderHDL loader, LdrPrimitiveID idx);
 LDR_API const LdrRenderPart* ldrGetRenderPart(LdrLoaderHDL loader, LdrPartID idx);
 
 #endif

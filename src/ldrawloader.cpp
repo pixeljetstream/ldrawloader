@@ -773,6 +773,7 @@ typedef TMesh<uint32_t, uint32_t, 16, 1> MeshFull;
 static const uint32_t EDGE_HARD_BIT         = 1;
 static const uint32_t EDGE_OPTIONAL_BIT     = 2;
 static const uint32_t EDGE_HARD_FLOATER_BIT = 4;
+static const uint32_t EDGE_MATERIAL_BIT     = 8;
 
 // separate class due to potential template usage for Mesh
 class MeshUtils
@@ -1791,7 +1792,6 @@ public:
       }
     }
 #endif
-
 
     // distribute
     // find out vertex splits
@@ -2979,11 +2979,12 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
         subfilename     = &subfilenameLong[0];
       }
 
-      int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f %f %f %f %[^\n\t]", &typ, &instance.material, mat + 12,
-                        mat + 13, mat + 14, mat + 0, mat + 4, mat + 8, mat + 1, mat + 5, mat + 9, mat + 2, mat + 6,
-                        mat + 10, subfilename);
+      int materialRead;
 
-      instance.material = fixupMaterialID(instance.material);
+      int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f %f %f %f %[^\n\t]", &typ, &materialRead, mat + 12, mat + 13,
+                        mat + 14, mat + 0, mat + 4, mat + 8, mat + 1, mat + 5, mat + 9, mat + 2, mat + 6, mat + 10, subfilename);
+
+      instance.material = fixupMaterialID(materialRead);
 
       instance.transform = mat_mul(transform, instance.transform);
       if(instance.material == LDR_MATERIALID_INHERIT) {
@@ -3153,20 +3154,6 @@ LdrResult Loader::makeRenderModel(LdrRenderModel& rmodel, LdrModelHDL model, Ldr
     }
 
     waitBuildRender(instance.part);
-    const LdrRenderPart& rpart = m_renderParts[instance.part];
-    if(rpart.materials) {
-      rinstance.materials.resize(rpart.num_triangles);
-      for(uint32_t t = 0; t < rpart.num_triangles; t++) {
-        rinstance.materials[t] = rpart.materials[t] == LDR_MATERIALID_INHERIT ? instance.material : rpart.materials[t];
-      }
-    }
-    if(rpart.materialsC) {
-      rinstance.materialsC.resize(rpart.num_trianglesC);
-      for(uint32_t t = 0; t < rpart.num_trianglesC; t++) {
-        rinstance.materialsC[t] = rpart.materialsC[t] == LDR_MATERIALID_INHERIT ? instance.material : rpart.materialsC[t];
-      }
-    }
-
     builder.instances.push_back(rinstance);
   }
 
@@ -3276,10 +3263,19 @@ public:
     }
   }
 
+  inline static void alignSize(LdrRawData& raw, size_t alignSz)
+  {
+    size_t rest = raw.size % alignSz;
+    if(rest) {
+      raw.size += alignSz - rest;
+    }
+  }
+
   template <class Tout>
   static uint16_t u16_append(LdrRawData& raw, Tout*& ptrRef, size_t num)
   {
     assert(num <= 0xFFFF);
+    alignSize(raw, alignof(Tout));
     ptrRef = (Tout*)raw.size;
     raw.size += sizeof(Tout) * num;
     return uint16_t(num);
@@ -3289,6 +3285,7 @@ public:
   static uint32_t u32_append(LdrRawData& raw, Tout*& ptrRef, size_t num)
   {
     assert(num <= 0xFFFFFFFF);
+    alignSize(raw, alignof(Tout));
     ptrRef = (Tout*)raw.size;
     raw.size += sizeof(Tout) * num;
     return uint32_t(num);
@@ -3298,6 +3295,7 @@ public:
   static uint16_t u16_append(LdrRawData& raw, Tout*& ptrRef, const Loader::TVector<T>& vec, size_t divisor = 1)
   {
     assert((vec.size() / divisor) <= 0xFFFF);
+    alignSize(raw, alignof(Tout));
     ptrRef = (Tout*)raw.size;
     raw.size += sizeof(Tout) * vec.size();
     return uint16_t(vec.size() / divisor);
@@ -3307,6 +3305,7 @@ public:
   static uint32_t u32_append(LdrRawData& raw, Tout*& ptrRef, const Loader::TVector<T>& vec, size_t divisor = 1)
   {
     assert((vec.size() / divisor) <= 0xFFFFFFFF);
+    alignSize(raw, alignof(Tout));
     ptrRef = (Tout*)raw.size;
     raw.size += sizeof(Tout) * vec.size();
     return uint32_t(vec.size() / divisor);
@@ -3739,17 +3738,17 @@ void Loader::initModel(LdrModel& model, const BuilderModel& builder)
 
 void Loader::initRenderPart(LdrRenderPart& renderpart, const BuilderRenderPart& builder, const LdrPart& part)
 {
-  uint32_t hasMaterials = part.flag.hasComplexMaterial ? 1 : 0;
-  renderpart.flag       = builder.flag;
-  renderpart.bbox       = builder.bbox;
-  renderpart.raw.size   = 0;
+  uint32_t keepMaterials = part.flag.hasComplexMaterial ? 1 : 0; //  && m_config.renderpartTriangleMaterials
+  renderpart.flag        = builder.flag;
+  renderpart.bbox        = builder.bbox;
+  renderpart.raw.size    = 0;
 
   renderpart.num_vertices   = Utils::u32_append(renderpart.raw, renderpart.vertices, builder.vertices);
   renderpart.num_lines      = Utils::u32_append(renderpart.raw, renderpart.lines, builder.lines, 2);
   renderpart.num_triangles  = Utils::u32_append(renderpart.raw, renderpart.triangles, builder.triangles, 3);
   renderpart.num_trianglesC = Utils::u32_append(renderpart.raw, renderpart.trianglesC, builder.trianglesC, 3);
-  Utils::u32_append(renderpart.raw, renderpart.materials, part.num_triangles * hasMaterials);
-  Utils::u32_append(renderpart.raw, renderpart.materialsC, builder.materialsC);
+  Utils::u32_append(renderpart.raw, renderpart.materials, renderpart.num_triangles * keepMaterials);
+  Utils::u32_append(renderpart.raw, renderpart.materialsC, renderpart.num_trianglesC * keepMaterials);
   renderpart.num_shapes = Utils::u32_append(renderpart.raw, renderpart.shapes, part.num_shapes);
 
   rawAllocate(renderpart.raw.size, &renderpart.raw);
@@ -3758,7 +3757,7 @@ void Loader::initRenderPart(LdrRenderPart& renderpart, const BuilderRenderPart& 
   Utils::setup_pointer(renderpart.raw, renderpart.lines, builder.lines);
   Utils::setup_pointer(renderpart.raw, renderpart.triangles, builder.triangles);
   Utils::setup_pointer(renderpart.raw, renderpart.trianglesC, builder.trianglesC);
-  Utils::setup_pointer(renderpart.raw, renderpart.materials, part.num_triangles * hasMaterials, part.materials);
+  Utils::setup_pointer(renderpart.raw, renderpart.materials, part.num_triangles * keepMaterials, part.materials);
   Utils::setup_pointer(renderpart.raw, renderpart.materialsC, builder.materialsC);
   Utils::setup_pointer(renderpart.raw, renderpart.shapes, part.num_shapes, part.shapes);
 }
@@ -3771,14 +3770,6 @@ void Loader::initRenderModel(LdrRenderModel& rmodel, const BuilderRenderModel& b
 
   size_t begin = rmodel.raw.size;
 
-  for(uint32_t i = 0; i < rmodel.num_instances; i++) {
-    const LdrRenderPart& part         = getRenderPart(builder.instances[i].instance.part);
-    uint32_t             hasMaterials = part.flag.hasComplexMaterial ? 1 : 0;
-
-    rmodel.raw.size += part.num_triangles * hasMaterials * sizeof(LdrMaterialID);
-    rmodel.raw.size += part.num_trianglesC * hasMaterials * sizeof(LdrMaterialID);
-  }
-
   rawAllocate(rmodel.raw.size, &rmodel.raw);
 
   Utils::setup_pointer(rmodel.raw, rmodel.instances, 0, true);
@@ -3787,26 +3778,6 @@ void Loader::initRenderModel(LdrRenderModel& rmodel, const BuilderRenderModel& b
     const LdrRenderPart& part      = getRenderPart(builder.instances[i].instance.part);
     LdrRenderInstance&   rinstance = rmodel.instances[i];
     rinstance.instance             = builder.instances[i].instance;
-
-    uint32_t hasMaterials = part.flag.hasComplexMaterial ? 1 : 0;
-
-    Utils::setup_pointer(rmodel.raw, rinstance.materials, begin, hasMaterials);
-    if(hasMaterials) {
-      for(uint32_t t = 0; t < part.num_triangles; t++) {
-        LdrMaterialID mtl      = part.materials[t];
-        rinstance.materials[t] = mtl == LDR_MATERIALID_INHERIT ? rinstance.instance.material : mtl;
-      }
-      begin += part.num_triangles * sizeof(LdrMaterialID);
-    }
-
-    Utils::setup_pointer(rmodel.raw, rinstance.materialsC, begin, hasMaterials);
-    if(hasMaterials && part.num_trianglesC) {
-      for(uint32_t t = 0; t < part.num_trianglesC; t++) {
-        LdrMaterialID mtl       = part.materialsC[t];
-        rinstance.materialsC[t] = mtl == LDR_MATERIALID_INHERIT ? rinstance.instance.material : mtl;
-      }
-      begin += part.num_trianglesC * sizeof(LdrMaterialID);
-    }
   }
 }
 
@@ -3840,6 +3811,18 @@ void Loader::deinitRenderModel(LdrRenderModel& model)
 // C-Api
 
 #if LDR_CFG_C_API
+
+LDR_API void ldrGetDefaultCreateInfo(LdrLoaderCreateInfo* info)
+{
+  memset(info, 0, sizeof(LdrLoaderCreateInfo));
+  info->partHiResPrimitives         = LDR_FALSE;
+  info->partFixMode                 = LDR_PART_FIX_NONE;
+  info->partFixTjunctions           = LDR_TRUE;
+  info->renderpartBuildMode         = LDR_RENDERPART_BUILD_ONLOAD;
+  info->renderpartChamfer           = 0.35f;
+  //info->renderpartTriangleMaterials = LDR_TRUE;
+  //info->renderpartVertexMaterials   = LDR_TRUE;
+}
 
 LDR_API LdrResult ldrCreateLoader(const LdrLoaderCreateInfo* info, LdrLoaderHDL* pLoader)
 {

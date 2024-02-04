@@ -464,8 +464,6 @@ private:
   struct BuilderRenderInstance
   {
     LdrInstance            instance;
-    TVector<LdrMaterialID> materials;
-    TVector<LdrMaterialID> materialsC;
   };
 
   struct BuilderRenderModel
