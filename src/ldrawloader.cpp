@@ -333,7 +333,7 @@ public:
 
     if(num > (1 << VTX_BITS)) {
       // FIXME check against this error
-      fprintf(stderr, "Mesh VTX_BITS too small\n");
+      fprintf(stderr, "Mesh VTX_BITS too small - %d > %d\n", num, (1 << VTX_BITS));
       exit(-1);
       return true;
     }
@@ -765,8 +765,8 @@ public:
   }
 };
 
-typedef TMesh<uint32_t, uint32_t, 16, 0> Mesh;
-typedef TMesh<uint32_t, uint32_t, 16, 1> MeshFull;
+typedef TMesh<uint32_t, uint64_t, 31, 0> Mesh;
+typedef TMesh<uint32_t, uint64_t, 31, 1> MeshFull;
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -2312,7 +2312,7 @@ LdrResult Loader::deferPart(const char* filename, bool allowPrimitives, PartEntr
   return LDR_SUCCESS;
 }
 
-LdrResult Loader::resolvePart(const char* filename, bool allowPrimitives, PartEntry& entry)
+LdrResult Loader::resolvePart(const char* filename, bool allowPrimitives, PartEntry& entry, uint32_t depth)
 {
   bool found = findEntry(filename, entry) == LDR_SUCCESS;
 
@@ -2325,11 +2325,11 @@ LdrResult Loader::resolvePart(const char* filename, bool allowPrimitives, PartEn
       if(result == LDR_SUCCESS) {
         // we are the first, let's load the part
         if(isPrimitive) {
-          result = loadData(m_primitives[entry.primID], m_renderParts[entry.primID], foundname.c_str(), isPrimitive);
+          result = loadData(m_primitives[entry.primID], m_renderParts[entry.primID], foundname.c_str(), isPrimitive, depth);
           signalPrimitive(entry.primID);
         }
         else {
-          result = loadData(m_parts[entry.partID], m_renderParts[entry.partID], foundname.c_str(), isPrimitive);
+          result = loadData(m_parts[entry.partID], m_renderParts[entry.partID], foundname.c_str(), isPrimitive, depth);
           signalPart(entry.partID);
           if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD) {
             signalBuildRender(entry.partID);
@@ -2349,6 +2349,9 @@ LdrResult Loader::resolvePart(const char* filename, bool allowPrimitives, PartEn
       }
     }
     else {
+#ifdef _DEBUG
+      fprintf(stderr, "file not found: %s\n", filename);
+#endif
       return LDR_ERROR_FILE_NOT_FOUND;
     }
   }
@@ -2362,7 +2365,7 @@ LdrResult Loader::resolvePart(const char* filename, bool allowPrimitives, PartEn
     else {
       // deferred loads could mean we have not started loading despite having found something
       if(startPartAction(entry.partID)) {
-        loadData(m_parts[entry.partID], m_renderParts[entry.partID], m_partFoundnames[entry.partID].c_str(), false);
+        loadData(m_parts[entry.partID], m_renderParts[entry.partID], m_partFoundnames[entry.partID].c_str(), false, depth);
         signalPart(entry.partID);
         if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD) {
           signalBuildRender(entry.partID);
@@ -2461,6 +2464,20 @@ LdrResult Loader::rawFree(const LdrRawData* raw)
   return LDR_SUCCESS;
 }
 
+LdrResult Loader::preloadPart(const char* filename, LdrPartID* pPartID)
+{
+  PartEntry entry;
+  LdrResult res = resolvePart(filename, false, entry, 0);
+  if(res == LDR_SUCCESS) {
+    *pPartID = entry.partID;
+  }
+  else {
+    *pPartID = LDR_INVALID_ID;
+  }
+
+  return res;
+}
+
 LdrResult Loader::buildRenderParts(uint32_t numParts, const LdrPartID* parts, size_t partStride)
 {
   if(m_config.partFixMode != LDR_RENDERPART_BUILD_ONDEMAND)
@@ -2510,7 +2527,7 @@ LdrResult Loader::loadDeferredParts(uint32_t numParts, const LdrPartID* parts, s
   for(uint32_t i = 0; i < numParts; i++) {
     LdrPartID partID = all ? (LdrPartID)i : *(const LdrPartID*)(((const uint8_t*)parts) + partStride * i);
     if(startPartAction(partID)) {
-      LdrResult result = loadData(m_parts[partID], m_renderParts[partID], m_partFoundnames[partID].c_str(), false);
+      LdrResult result = loadData(m_parts[partID], m_renderParts[partID], m_partFoundnames[partID].c_str(), false, 0);
       signalPart(partID);
       if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD) {
         signalBuildRender(partID);
@@ -2614,7 +2631,7 @@ void Loader::destroyRenderModel(LdrRenderModelHDL renderModel)
   }
 }
 
-LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char* filename, bool isPrimitive)
+LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char* filename, bool isPrimitive, uint32_t depth)
 {
   Text txt;
   if(!txt.load(filename)) {
@@ -2624,6 +2641,11 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
     part.loadResult = LDR_ERROR_FILE_NOT_FOUND;
     return part.loadResult;
   }
+#ifdef _DEBUG
+  const char* depth_prefix = "...................";
+  uint32_t    clampDepth   = (uint32_t)strlen(depth_prefix);
+  printf("%sldr load data %s\n", &depth_prefix[clampDepth - std::min(depth, clampDepth)], filename);
+#endif
 
   BuilderPart builder;
   builder.flag.isPrimitive = isPrimitive ? 1 : 0;
@@ -2655,6 +2677,7 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
     int material = LDR_MATERIALID_INHERIT;
 
     int typ = atoi(line);
+
     switch(typ) {
       case 0: {
         // we only care for BFC
@@ -2703,10 +2726,13 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           subfilename     = &subfilenameLong[0];
         }
 
-        int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f %f %f %f %[^\n\t]", &dummy, &material, mat + 12, mat + 13,
+        int read = sscanf(line, "%d %i %f %f %f %f %f %f %f %f %f %f %f %f %[^\n\t]", &dummy, &material, mat + 12, mat + 13,
                           mat + 14, mat + 0, mat + 4, mat + 8, mat + 1, mat + 5, mat + 9, mat + 2, mat + 6, mat + 10, subfilename);
 
         if(read != 15) {
+#ifdef _DEBUG
+          fprintf(stderr, "ldr parser error: %s - %s\n", filename, line);
+#endif
           part.loadResult = LDR_ERROR_PARSER;
           return part.loadResult;
         }
@@ -2726,7 +2752,7 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         }
         else {
           PartEntry entry;
-          LdrResult result = resolvePart(subfilename, true, entry);
+          LdrResult result = resolvePart(subfilename, true, entry, depth + 1);
           if(result == LDR_SUCCESS) {
             if(entry.isPrimitive()) {
               appendBuilderPrimitive(builder, transform, entry.primID, material, invertNext);
@@ -2752,8 +2778,11 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         LdrVector vecB;
         // line
         int read =
-            sscanf(line, "%d %d %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y, &vecA.z, &vecB.x, &vecB.y, &vecB.z);
+            sscanf(line, "%d %i %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y, &vecA.z, &vecB.x, &vecB.y, &vecB.z);
         if(read != 8) {
+#ifdef _DEBUG
+          fprintf(stderr, "ldr parser error: %s - %s\n", filename, line);
+#endif
           part.loadResult = LDR_ERROR_PARSER;
           return part.loadResult;
         }
@@ -2765,7 +2794,7 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         builder.lines.push_back(vidx + 1);
         builder.positions.push_back(vecA);
         builder.positions.push_back(vecB);
-        assert(material == LDR_MATERIALID_EDGE);
+        //assert(material == LDR_MATERIALID_EDGE);
 
         builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecA, vecB)));
       } break;
@@ -2775,9 +2804,13 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         LdrVector vecB;
         LdrVector vecC;
         // line
-        int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y, &vecA.z,
+        int read = sscanf(line, "%d %i %f %f %f %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y, &vecA.z,
                           &vecB.x, &vecB.y, &vecB.z, &vecC.x, &vecC.y, &vecC.z);
+
         if(read != 11) {
+#ifdef _DEBUG
+          fprintf(stderr, "ldr parser error: %s - %s\n", filename, line);
+#endif
           part.loadResult = LDR_ERROR_PARSER;
           return part.loadResult;
         }
@@ -2817,9 +2850,12 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         LdrVector vecC;
         LdrVector vecD;
         // line
-        int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y,
+        int read = sscanf(line, "%d %i %f %f %f %f %f %f %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y,
                           &vecA.z, &vecB.x, &vecB.y, &vecB.z, &vecC.x, &vecC.y, &vecC.z, &vecD.x, &vecD.y, &vecD.z);
         if(read != 14) {
+#ifdef _DEBUG
+          fprintf(stderr, "ldr parser error: %s - %s\n", filename, line);
+#endif
           part.loadResult = LDR_ERROR_PARSER;
           return part.loadResult;
         }
@@ -2879,8 +2915,11 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         LdrVector vecB;
         // line
         int read =
-            sscanf(line, "%d %d %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y, &vecA.z, &vecB.x, &vecB.y, &vecB.z);
+            sscanf(line, "%d %i %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y, &vecA.z, &vecB.x, &vecB.y, &vecB.z);
         if(read != 8) {
+#ifdef _DEBUG
+          fprintf(stderr, "ldr parser error: %s - %s\n", filename, line);
+#endif
           part.loadResult = LDR_ERROR_PARSER;
           return part.loadResult;
         }
@@ -2981,7 +3020,7 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
 
       int materialRead;
 
-      int read = sscanf(line, "%d %d %f %f %f %f %f %f %f %f %f %f %f %f %[^\n\t]", &typ, &materialRead, mat + 12, mat + 13,
+      int read = sscanf(line, "%d %i %f %f %f %f %f %f %f %f %f %f %f %f %[^\n\t]", &typ, &materialRead, mat + 12, mat + 13,
                         mat + 14, mat + 0, mat + 4, mat + 8, mat + 1, mat + 5, mat + 9, mat + 2, mat + 6, mat + 10, subfilename);
 
       instance.material = fixupMaterialID(materialRead);
@@ -3012,7 +3051,8 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
         // look in library
         if(!found) {
           PartEntry entry;
-          LdrResult result = autoResolve ? resolvePart(subfilename, false, entry) : deferPart(subfilename, false, entry);
+          LdrResult result =
+              autoResolve ? resolvePart(subfilename, false, entry, depth + 1) : deferPart(subfilename, false, entry);
           if(result == LDR_SUCCESS) {
             instance.part = entry.partID;
             builder.instances.push_back(instance);
@@ -3738,7 +3778,7 @@ void Loader::initModel(LdrModel& model, const BuilderModel& builder)
 
 void Loader::initRenderPart(LdrRenderPart& renderpart, const BuilderRenderPart& builder, const LdrPart& part)
 {
-  uint32_t keepMaterials = part.flag.hasComplexMaterial ? 1 : 0; //  && m_config.renderpartTriangleMaterials
+  uint32_t keepMaterials = part.flag.hasComplexMaterial ? 1 : 0;  //  && m_config.renderpartTriangleMaterials
   renderpart.flag        = builder.flag;
   renderpart.bbox        = builder.bbox;
   renderpart.raw.size    = 0;
@@ -3815,11 +3855,11 @@ void Loader::deinitRenderModel(LdrRenderModel& model)
 LDR_API void ldrGetDefaultCreateInfo(LdrLoaderCreateInfo* info)
 {
   memset(info, 0, sizeof(LdrLoaderCreateInfo));
-  info->partHiResPrimitives         = LDR_FALSE;
-  info->partFixMode                 = LDR_PART_FIX_NONE;
-  info->partFixTjunctions           = LDR_TRUE;
-  info->renderpartBuildMode         = LDR_RENDERPART_BUILD_ONLOAD;
-  info->renderpartChamfer           = 0.35f;
+  info->partHiResPrimitives = LDR_FALSE;
+  info->partFixMode         = LDR_PART_FIX_NONE;
+  info->partFixTjunctions   = LDR_TRUE;
+  info->renderpartBuildMode = LDR_RENDERPART_BUILD_ONLOAD;
+  info->renderpartChamfer   = 0.35f;
   //info->renderpartTriangleMaterials = LDR_TRUE;
   //info->renderpartVertexMaterials   = LDR_TRUE;
 }
@@ -3881,6 +3921,12 @@ LDR_API LdrResult ldrRawFree(LdrLoaderHDL loader, const LdrRawData* raw)
 {
   ldr::Loader* lldr = (ldr::Loader*)loader;
   return lldr->rawFree(raw);
+}
+
+LDR_API LdrResult ldrPreloadPart(LdrLoaderHDL loader, const char* filename, LdrPartID* pPartID)
+{
+  ldr::Loader* lldr = (ldr::Loader*)loader;
+  return lldr->preloadPart(filename, pPartID);
 }
 
 LDR_API LdrResult ldrBuildRenderParts(LdrLoaderHDL loader, uint32_t numParts, const LdrPartID* parts, size_t partStride)

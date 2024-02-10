@@ -174,12 +174,16 @@ typedef struct LdrBbox
 
 //////////////////////////////////////////////////////////////////////////
 
+// materials with code >= 0x2000000 are kept as is
 // materials with code >= 10000 are rebased and start at 512
 
 typedef enum LdrMaterialSpecial : uint32_t
 {
-  LDR_MATERIALID_INHERIT = 16,
-  LDR_MATERIALID_EDGE    = 24,
+  LDR_MATERIALID_INHERIT     = 16,
+  LDR_MATERIALID_EDGE        = 24,
+  // materialIds starting from this value are to be interpreted as 0x00RRGGBB
+  // about 100 part files use this deprecated method
+  LDR_MATERIALID_DIRECTSTART = 0x2000000,
 } LdrMaterialSpecial;
 
 typedef enum LdrMaterialType : uint32_t
@@ -327,9 +331,9 @@ typedef struct LdrModel
 
 typedef struct LdrRenderVertex
 {
-  LdrVector     position;
+  LdrVector position;
   //LdrMaterialID material; // validity depends on LdrLoaderCreateInfo::renderpartVertexMaterials
-  LdrVector     normal;
+  LdrVector normal;
   //uint32_t      _pad;
 } LdrRenderVertex;
 
@@ -458,6 +462,9 @@ LDR_API LdrResult ldrRegisterRenderPart(LdrLoaderHDL loader, LdrPartID partId, c
 // for custom overrides
 LDR_API LdrResult ldrRawAllocate(LdrLoaderHDL loader, size_t size, LdrRawData* raw);
 LDR_API LdrResult ldrRawFree(LdrLoaderHDL loader, const LdrRawData* raw);
+
+// pre-load a part
+LDR_API LdrResult ldrPreloadPart(LdrLoaderHDL loader, const char* filename, LdrPartID* pPartID);
 
 // When "autoResolve" is used, all dependencies (part/primitive loading) are resolved automatically.
 // Without this we defer loading the actual parts and you must load them manually.

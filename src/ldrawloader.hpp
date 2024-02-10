@@ -70,6 +70,8 @@ public:
   LdrResult rawAllocate(size_t size, LdrRawData* raw);
   LdrResult rawFree(const LdrRawData* raw);
 
+  LdrResult preloadPart(const char* filename, LdrPartID* pPartID);
+
   LdrResult buildRenderParts(uint32_t numParts, const LdrPartID* parts, size_t partStride);
 
   LdrResult createModel(const char* filename, LdrBool32 autoResolve, LdrModelHDL* pModel);
@@ -134,6 +136,7 @@ public:
 private:
   static const uint32_t MATERIAL_ORIGINAL = 512;
   static const uint32_t MATERIAL_CUSTOM   = 10000;
+  static const uint32_t MATERIAL_DIRECT   = 0x2000000;
 
   // subpart are parts from parts/s directory
   static const bool SUBPART_AS_PRIMITIVE = true;
@@ -415,7 +418,8 @@ private:
     {
       if(connections[v] == LDR_INVALID_IDX) {
         connections[v] = (uint32_t)positions.size();
-        positions.push_back(positions[v]);
+        LdrVector tmp  = positions[v];
+        positions.push_back(tmp);
         connections.push_back(v);
       }
       return connections[v];
@@ -511,6 +515,8 @@ private:
   {
     if(m < MATERIAL_ORIGINAL)
       return m;
+    else if(m >= MATERIAL_DIRECT)
+      return m;
     else if(m >= MATERIAL_CUSTOM)
       return MATERIAL_ORIGINAL + (m - MATERIAL_CUSTOM);
     else {
@@ -523,12 +529,12 @@ private:
   LdrResult registerInternalPart(const char* filename, const std::string& foundname, bool isPrimitive, bool startLoad, PartEntry& entry);
 
   LdrResult deferPart(const char* filename, bool allowPrimitive, PartEntry& entry);
-  LdrResult resolvePart(const char* filename, bool allowPrimitive, PartEntry& entry);
+  LdrResult resolvePart(const char* filename, bool allowPrimitive, PartEntry& entry, uint32_t depth);
   LdrResult resolveRenderPart(LdrPartID partid);
 
   bool findLibraryFile(const char* filename, std::string& foundname, bool allowPrimitives, bool& isPrimitive);
 
-  LdrResult loadData(LdrPart& part, LdrRenderPart& renderpart, const char* filename, bool isPrimitive);
+  LdrResult loadData(LdrPart& part, LdrRenderPart& renderpart, const char* filename, bool isPrimitive, uint32_t depth);
   LdrResult loadModel(LdrModel& model, const char* filename, LdrBool32 autoResolve);
   LdrResult makeRenderModel(LdrRenderModel& rmodel, LdrModelHDL model, LdrBool32 autoResolve);
 
