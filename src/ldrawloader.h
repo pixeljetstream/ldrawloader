@@ -492,10 +492,11 @@ LDR_API uint32_t ldrGetNumRegisteredParts(LdrLoaderHDL loader);
 
 LDR_API uint32_t ldrGetNumRegisteredMaterials(LdrLoaderHDL loader);
 
-LDR_API const LdrMaterial*   ldrGetMaterial(LdrLoaderHDL loader, LdrMaterialID idx);
-LDR_API const LdrPart*       ldrGetPart(LdrLoaderHDL loader, LdrPartID idx);
-LDR_API const LdrPart*       ldrGetPrimitive(LdrLoaderHDL loader, LdrPrimitiveID idx);
-LDR_API const LdrRenderPart* ldrGetRenderPart(LdrLoaderHDL loader, LdrPartID idx);
+// will return nullptr if id is invalid or renderpart not built
+LDR_API const LdrMaterial*   ldrGetMaterial(LdrLoaderHDL loader, LdrMaterialID id);
+LDR_API const LdrPart*       ldrGetPart(LdrLoaderHDL loader, LdrPartID id);
+LDR_API const LdrPart*       ldrGetPrimitive(LdrLoaderHDL loader, LdrPrimitiveID id);
+LDR_API const LdrRenderPart* ldrGetRenderPart(LdrLoaderHDL loader, LdrPartID id);
 
 #endif
 

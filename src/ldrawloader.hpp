@@ -84,10 +84,57 @@ public:
 
   LdrResult loadDeferredParts(uint32_t numParts, const LdrPartID* parts, size_t partStride);
 
-  inline const LdrMaterial&   getMaterial(LdrMaterialID idx) const { return m_materials[idx]; }
-  inline const LdrPart&       getPart(LdrPartID idx) const { return m_parts[idx]; }
-  inline const LdrPart&       getPrimitive(LdrPrimitiveID idx) const { return m_primitives[idx]; }
-  inline const LdrRenderPart& getRenderPart(LdrPartID idx) const { return m_renderParts[idx]; }
+  inline const LdrMaterial& getMaterial(LdrMaterialID id) const
+  {
+    assert(id < m_materials.size());
+    return m_materials[id];
+  }
+  inline const LdrPart& getPrimitive(LdrPrimitiveID id) const
+  {
+    assert(id < m_primitives.size());
+    return m_primitives[id];
+  }
+  inline const LdrPart& getPart(LdrPartID id) const
+  {
+    assert(id < m_parts.size());
+    return m_parts[id];
+  }
+  inline const LdrRenderPart& getRenderPart(LdrPartID id) const
+  {
+    assert(id < m_renderParts.size());
+    return m_renderParts[id];
+  }
+
+  // may return nullptr on invalid id
+
+  inline const LdrMaterial* getMaterialP(LdrMaterialID id) const
+  {
+    if(id < m_materials.size())
+      return &m_materials[id];
+    else
+      return nullptr;
+  }
+  inline const LdrPart* getPrimitiveP(LdrPrimitiveID id) const
+  {
+    if(id < m_primitives.size())
+      return &m_primitives[id];
+    else
+      return nullptr;
+  }
+  inline const LdrPart* getPartP(LdrPartID id) const
+  {
+    if(id < m_parts.size())
+      return &m_parts[id];
+    else
+      return nullptr;
+  }
+  inline const LdrRenderPart* getRenderPartP(LdrPartID id) const
+  {
+    if(id < m_renderParts.size() && m_renderParts[id].raw.data)
+      return &m_renderParts[id];
+    else
+      return nullptr;
+  }
 
   inline uint32_t getNumRegisteredParts() const
   {
@@ -141,6 +188,7 @@ private:
   // subpart are parts from parts/s directory
   static const bool SUBPART_AS_PRIMITIVE = true;
 
+  static const float COPLANAR_TRIANGLE_DOT;
   static const float NO_AREA_TRIANGLE_DOT;
   static const float FORCED_HARD_EDGE_DOT;
   static const float CHAMFER_PARALLEL_DOT;
@@ -151,7 +199,7 @@ private:
 
   static const float MIN_MERGE_EPSILON;
 
-  static const uint32_t MAX_PARTS = 16384;
+  static const uint32_t MAX_PARTS = 32 * 1024;
   static const uint32_t MAX_PRIMS = 8192;
 
   // first two search paths are within primitive directory
@@ -244,7 +292,7 @@ private:
         m_size     = 0;
       }
     };
-    void push_back(const T& val)
+    void push_back(const T val)
     {
       if(m_size + 1 > m_capacity) {
         uint32_t nextSize = (m_size * 3) / 2;
@@ -414,6 +462,8 @@ private:
     TVector<LdrShape>      shapes;
     TVector<LdrInstance>   instances;
 
+    Loader* loader = nullptr; // mostly for debugging
+
     inline uint32_t addConnection(uint32_t v)
     {
       if(connections[v] == LDR_INVALID_IDX) {
@@ -441,6 +491,8 @@ private:
 
   struct BuilderRenderPart
   {
+    const char* filename;
+
     struct EdgePair
     {
       uint32_t edgeA;
@@ -463,11 +515,13 @@ private:
     TVector<uint32_t>  vtxOutBegin;
 
     TVector<EdgePair> vtxOutEdgePairs;
+
+    Loader* loader = nullptr; // mostly for debugging
   };
 
   struct BuilderRenderInstance
   {
-    LdrInstance            instance;
+    LdrInstance instance;
   };
 
   struct BuilderRenderModel

@@ -30,6 +30,9 @@
 #include <intrin.h>
 #include <stdlib.h>
 
+#define LDR_DEBUG_FLAG_FILELOAD 1
+#define LDR_DEBUG_FLAG 0
+
 namespace ldr {
 
 // ignores projective
@@ -191,11 +194,12 @@ inline void bbox_merge(LdrBbox& bbox, const LdrMatrix& transform, const LdrBbox 
 
 //////////////////////////////////////////////////////////////////////////
 
-const float Loader::NO_AREA_TRIANGLE_DOT = 0.9999f;
-const float Loader::FORCED_HARD_EDGE_DOT = 0.2f;
-const float Loader::CHAMFER_PARALLEL_DOT = 0.999f;
-const float Loader::ANGLE_45_DOT         = 0.7071f;
-const float Loader::MIN_MERGE_EPSILON    = 0.005f;  // 1 LDU ~ 0.4mm
+const float Loader::COPLANAR_TRIANGLE_DOT = 0.99f;
+const float Loader::NO_AREA_TRIANGLE_DOT  = 0.9999f;
+const float Loader::FORCED_HARD_EDGE_DOT  = 0.2f;
+const float Loader::CHAMFER_PARALLEL_DOT  = 0.999f;
+const float Loader::ANGLE_45_DOT          = 0.7071f;
+const float Loader::MIN_MERGE_EPSILON     = 0.005f;  // 1 LDU ~ 0.4mm
 
 
 template <class TvtxIndex_t, class TvtxIndexPair, int VTX_BITS, int VTX_TRIS>
@@ -233,6 +237,15 @@ public:
     Loader::TVector<Info>     infos;
     Loader::TVector<uint32_t> content;
 
+    Loader* loader = nullptr;  // mostly for debugging
+
+
+    void resize(uint32_t num)
+    {
+      infos.resize(num);
+      content.reserve(num * GROWTH);
+    }
+
     // pointer only valid as long as no edits are made
     const uint32_t* getConnected(uint32_t v, uint32_t& count) const
     {
@@ -256,6 +269,7 @@ public:
 
         offset = newoffset;
       }
+
       content[offset + old] = element;
     }
 
@@ -273,11 +287,11 @@ public:
   };
 
   // additional left/right for non-manifold overflow
-  // we currently assume there is never more than 4 triangles connected to the same edge
+  // linked list
   struct EdgeNM
   {
-    uint32_t triLeft;
-    uint32_t triRight;
+    uint32_t tri    = INVALID;
+    uint32_t nextNM = INVALID;
   };
 
   struct Edge
@@ -290,6 +304,15 @@ public:
     uint32_t   triLeft;
     uint32_t   triRight;
     uint32_t   flag;
+    uint32_t   nmLeft;
+    uint32_t   nmRight;
+
+    bool isNonManifold() const
+    {
+      bool state = (flag & EDGE_NONMANIFOLD) != 0;
+      assert(state == (nmLeft != INVALID || nmRight != INVALID));
+      return state;
+    }
 
     bool isDead() const { return triLeft == INVALID; }
 
@@ -308,27 +331,36 @@ public:
     vtxPair_t getPair() const { return make_vtxPair(vtxA, vtxB); }
   };
 
-  uint32_t numVertices  = 0;
-  uint32_t numTriangles = 0;
-  uint32_t numEdges     = 0;
+
+  uint32_t numVertices         = 0;
+  uint32_t numTriangles        = 0;
+  uint32_t numEdges            = 0;
+  uint32_t freeNM              = INVALID;
+  bool     nonManifoldEdges    = false;
+  bool     nonManifoldVertices = false;
 
   vtxIndex_t* triangles = nullptr;
 
   Connectivity vtxTriangles;
   Connectivity vtxEdges;
 
-  Loader::BitArray                        triAlive;
-  Loader::TVector<Edge>                   edges;
-  Loader::TVector<EdgeNM>                 edgesNM;
+  Loader::BitArray        triAlive;
+  Loader::TVector<Edge>   edges;
+  Loader::TVector<EdgeNM> edgesNM;
+
   std::unordered_map<vtxPair_t, uint32_t> lookupEdge;
+
+#ifdef _DEBUG
+  Loader* loader = nullptr;
+#endif
 
   inline bool resizeVertices(uint32_t num)
   {
     numVertices = num;
-    vtxEdges.infos.resize(numVertices);
+    vtxEdges.resize(numVertices);
 
     if(VTX_TRIS) {
-      vtxTriangles.infos.resize(numVertices);
+      vtxTriangles.resize(numVertices);
     }
 
     if(num > (1 << VTX_BITS)) {
@@ -468,6 +500,109 @@ public:
     return edgePrevIndex;
   }
 
+  uint32_t addEdgeNM(uint32_t startNM, uint32_t tri)
+  {
+    uint32_t nextNM = startNM;
+
+    while(nextNM != INVALID) {
+      EdgeNM& edgeNM = edgesNM[nextNM];
+      if(edgeNM.tri == tri)
+        return startNM;
+
+      nextNM = edgeNM.nextNM;
+    }
+
+    uint32_t outNextNM;
+    if(freeNM != INVALID) {
+      outNextNM = freeNM;
+      freeNM    = edgesNM[freeNM].nextNM;
+
+      edgesNM[outNextNM].tri    = tri;
+      edgesNM[outNextNM].nextNM = startNM;
+    }
+    else {
+      outNextNM = edgesNM.size();
+      edgesNM.push_back({tri, startNM});
+    }
+
+    return outNextNM;
+  }
+
+  uint32_t popEdgeNM(uint32_t& startNM)
+  {
+    if(startNM != INVALID) {
+      EdgeNM&  edgeNM  = edgesNM[startNM];
+      uint32_t current = startNM;
+      // change list head
+      startNM      = edgeNM.nextNM;
+      uint32_t tri = edgeNM.tri;
+      // insert into freelist
+      edgeNM.nextNM = freeNM;
+      edgeNM.tri    = INVALID;
+      freeNM        = current;
+
+      return tri;
+    }
+    else {
+      return INVALID;
+    }
+  }
+
+  uint32_t iterateEdgeNM(uint32_t& startNM) const
+  {
+    if(startNM != INVALID) {
+      const EdgeNM& edgeNM = edgesNM[startNM];
+      startNM              = edgeNM.nextNM;
+      return edgeNM.tri;
+    }
+    return INVALID;
+  }
+
+  bool removeEdgeNM(uint32_t& startNM, uint32_t tri)
+  {
+    uint32_t nextNM = startNM;
+    uint32_t prevNM = INVALID;
+
+    while(nextNM != INVALID) {
+      EdgeNM& edgeNM = edgesNM[nextNM];
+      if(edgeNM.tri == tri) {
+        uint32_t oldNextNM = edgeNM.nextNM;
+        // insert into freelist
+        edgeNM.nextNM = freeNM;
+        edgeNM.tri    = INVALID;
+        freeNM        = nextNM;
+
+        if(prevNM != INVALID) {
+          edgesNM[prevNM].nextNM = oldNextNM;
+        }
+        else {
+          // change list head
+          startNM = oldNextNM;
+        }
+
+        return true;
+      }
+
+      prevNM = nextNM;
+      nextNM = edgeNM.nextNM;
+    }
+    return false;
+  }
+
+  uint32_t countEdgeNM(uint32_t startNM) const
+  {
+    uint32_t count  = 0;
+    uint32_t nextNM = startNM;
+
+    while(nextNM != INVALID) {
+      const EdgeNM& edgeNM = edgesNM[nextNM];
+      count++;
+
+      nextNM = edgeNM.nextNM;
+    }
+    return count;
+  }
+
   uint32_t addEdge(vtxIndex_t vtxA, vtxIndex_t vtxB, uint32_t tri, uint32_t& nonManifold)
   {
     vtxPair_t pair = make_vtxPair(vtxA, vtxB);
@@ -483,19 +618,14 @@ public:
         edge.triRight = tri;
       }
       else {
-        // non-manifold
-        edgesNM.resize(edges.size(), {INVALID, INVALID});
-
-        EdgeNM& edgeNM = edgesNM[it->second];
-        if(edge.vtxA == vtxA && edgeNM.triLeft == INVALID) {
-          edgeNM.triLeft = tri;
-        }
-        else if(edge.vtxB == vtxA && edgeNM.triRight == INVALID) {
-          edgeNM.triRight = tri;
+        if(edge.vtxA == vtxA) {
+          edge.nmLeft = addEdgeNM(edge.nmLeft, tri);
         }
         else {
-          assert(0);
+          edge.nmRight = addEdgeNM(edge.nmRight, tri);
         }
+
+        edge.flag |= EDGE_NONMANIFOLD;
 
         nonManifold = it->second;
       }
@@ -504,7 +634,7 @@ public:
     }
     else {
       uint32_t edgeIdx = numEdges;
-      edges.push_back({vtxA, vtxB, tri, INVALID, 0});
+      edges.push_back({vtxA, vtxB, tri, INVALID, 0, INVALID, INVALID});
       lookupEdge.insert({pair, edgeIdx});
 
       vtxEdges.add(vtxA, edgeIdx);
@@ -523,11 +653,12 @@ public:
       return;
 
     Edge& edge = edges[it->second];
-    if(it->second >= edgesNM.size()) {
+    if(!edge.isNonManifold()) {
       if(edge.triRight == tri) {
         edge.triRight = INVALID;
       }
       else if(edge.triRight != INVALID) {
+        // if only right left, migrate right to left
         edge.triLeft  = edge.triRight;
         uint32_t temp = edge.vtxB;
         edge.vtxB     = edge.vtxA;
@@ -544,42 +675,40 @@ public:
       }
     }
     else {
-      EdgeNM& edgeNM = edgesNM[it->second];
-      if(edgeNM.triLeft == tri) {
-        edgeNM.triLeft = INVALID;
-      }
-      else if(edgeNM.triRight == tri) {
-        edgeNM.triRight = INVALID;
-      }
-      if(edge.triRight == tri) {
-        edge.triRight   = edgeNM.triRight;
-        edgeNM.triRight = INVALID;
-      }
-      else if(edge.triLeft == tri) {
-        if(edgeNM.triLeft != INVALID) {
-          edge.triLeft   = edgeNM.triLeft;
-          edgeNM.triLeft = INVALID;
-        }
-        else if(edge.triRight != INVALID) {
-          edge.triLeft  = edge.triRight;
-          uint32_t temp = edge.vtxB;
-          edge.vtxB     = edge.vtxA;
-          edge.vtxA     = temp;
-          edge.triRight = INVALID;
-
-          temp            = edgeNM.triLeft;
-          edgeNM.triLeft  = edgeNM.triRight;
-          edgeNM.triRight = temp;
+      if(edge.vtxA == vtxA) {
+        if(edge.triLeft == tri) {
+          edge.triLeft = popEdgeNM(edge.nmLeft);
         }
         else {
-          edge.triLeft = INVALID;
-
-          vtxEdges.remove(edge.vtxA, it->second);
-          vtxEdges.remove(edge.vtxB, it->second);
-
-          lookupEdge.erase(pair);
+          removeEdgeNM(edge.nmLeft, tri);
         }
       }
+      else {
+        if(edge.triRight == tri) {
+          edge.triRight = popEdgeNM(edge.nmRight);
+        }
+        else {
+          removeEdgeNM(edge.nmRight, tri);
+        }
+      }
+
+      // if only right left, migrate right to left
+      if(edge.triLeft == INVALID && edge.triRight != INVALID) {
+        edge.triLeft  = edge.triRight;
+        uint32_t temp = edge.vtxB;
+        edge.vtxB     = edge.vtxA;
+        edge.vtxA     = temp;
+        edge.triRight = INVALID;
+      }
+      else if(edge.triLeft == INVALID) {
+        vtxEdges.remove(edge.vtxA, it->second);
+        vtxEdges.remove(edge.vtxB, it->second);
+
+        lookupEdge.erase(pair);
+      }
+
+      if(edge.nmLeft == INVALID && edge.nmRight == INVALID)
+        edge.flag &= ~EDGE_NONMANIFOLD;
     }
   }
 
@@ -730,12 +859,15 @@ public:
     }
   }
 
-  bool init(uint32_t numV, uint32_t numT, vtxIndex_t* tris)
+  void initBasics(uint32_t numV, uint32_t numT, vtxIndex_t* tris, Loader* _loader)
   {
-    bool nonManifold = false;
+    loader              = _loader;
+    vtxEdges.loader     = _loader;
+    vtxTriangles.loader = _loader;
 
-    numTriangles = numT;
+
     numEdges     = 0;
+    numTriangles = numT;
     triangles    = tris;
 
     edges.reserve(numT * 3);
@@ -743,25 +875,18 @@ public:
     triAlive.resize(numT, false);
 
     resizeVertices(numV);
+  }
+
+  bool initFull(uint32_t numV, uint32_t numT, vtxIndex_t* tris, Loader* _loader)
+  {
+    bool nonManifold = false;
+    initBasics(numV, numT, tris, _loader);
 
     for(uint32_t t = 0; t < numT; t++) {
       nonManifold = (addTriangle(t) != INVALID) || nonManifold;
     }
 
     return nonManifold;
-  }
-
-  void reserve(uint32_t numV, uint32_t numT, vtxIndex_t* tris)
-  {
-    numEdges     = 0;
-    numTriangles = numT;
-    triangles    = tris;
-
-    edges.reserve(numT * 3);
-    lookupEdge.reserve(numT * 3);
-    triAlive.resize(numT, false);
-
-    resizeVertices(numV);
   }
 };
 
@@ -770,10 +895,11 @@ typedef TMesh<uint32_t, uint64_t, 31, 1> MeshFull;
 
 //////////////////////////////////////////////////////////////////////////
 
-static const uint32_t EDGE_HARD_BIT         = 1;
-static const uint32_t EDGE_OPTIONAL_BIT     = 2;
-static const uint32_t EDGE_HARD_FLOATER_BIT = 4;
-static const uint32_t EDGE_MATERIAL_BIT     = 8;
+static const uint32_t EDGE_HARD_BIT         = 1 << 0;
+static const uint32_t EDGE_OPTIONAL_BIT     = 1 << 1;
+static const uint32_t EDGE_HARD_FLOATER_BIT = 1 << 2;
+static const uint32_t EDGE_MATERIAL_BIT     = 1 << 3;
+static const uint32_t EDGE_NONMANIFOLD      = 1 << 4;
 
 // separate class due to potential template usage for Mesh
 class MeshUtils
@@ -781,11 +907,6 @@ class MeshUtils
 public:
   static void initNonManifold(Mesh& mesh, Loader::BuilderPart& builder)
   {
-    mesh.reserve(builder.positions.size(), builder.triangles.size() / 3, builder.triangles.data());
-
-    // fill mesh and fix non-manifold
-    builder.connections.resize(builder.positions.size(), LDR_INVALID_IDX);
-
     uint32_t numT = builder.triangles.size() / 3;
     uint32_t numV = builder.positions.size();
 
@@ -812,8 +933,12 @@ public:
         uint32_t    tOther      = edge.vtxA == vtx[0] ? edge.triLeft : edge.triRight;
         LdrVector   normal      = mesh.getTriangleNormal(t, builder.positions.data());
         LdrVector   normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
-        if(vec_dot(normal, normalOther) > 0.99) {
+        if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
           LdrVector side = vec_cross(normal, vec_sub(builder.positions[edge.vtxA], builder.positions[edge.vtxB]));
+
+#if defined(_DEBUG)
+          printf("nonmanifold coplanar: t %d - %s\n", t, builder.filename.c_str());
+#endif
 
           // find furthest vertex from the edge
 
@@ -860,6 +985,7 @@ public:
     if(!nonManifold)
       return;
 
+
     // if nonManifold remain we test against two scenarios per edge
     //
     // view along edge x:
@@ -893,20 +1019,23 @@ public:
 
     for(uint32_t e = 0; e < mesh.numEdges; e++) {
       Mesh::Edge edge = mesh.edges[e];
-      if(e >= mesh.edgesNM.size()) {
-        break;
+      if(!edge.isNonManifold()) {
+        continue;
       }
 
-      Mesh::EdgeNM edgeNM = mesh.edgesNM[e];
+      uint32_t numLeftNM  = mesh.countEdgeNM(edge.nmLeft);
+      uint32_t numRightNM = mesh.countEdgeNM(edge.nmRight);
 
-      if(edgeNM.triRight != Mesh::INVALID && edgeNM.triLeft != Mesh::INVALID) {
+      if(numLeftNM == 1 && numRightNM == 1) {
+
         // 4 surfaces per edge
         // We may need to split one or two vertices, find out which by clustering the triangles/edges
         // into vtxA and vtxB connections.
 
         // We prefer to split the vertex at the opposite side of the average normal (see normal dot later)
 
-        uint32_t edgeTriangles[4] = {edge.triLeft, edge.triRight, edgeNM.triLeft, edgeNM.triRight};
+        uint32_t edgeTriangles[4] = {edge.triLeft, edge.triRight, mesh.edgesNM[edge.nmLeft].tri,
+                                     mesh.edgesNM[edge.nmRight].tri};
 
         LdrVector vecAB    = vec_sub(builder.positions[edge.vtxB], builder.positions[edge.vtxA]);
         LdrVector normalAB = vec_normalize(vecAB);
@@ -1062,11 +1191,15 @@ public:
           }
           // split both, NYI
           //assert(0);
+          fprintf(stderr, "could not split 4-sided non-manifold: e %d - ts %d %d %d %d - %s\n", e, edgeTriangles[0],
+                  edgeTriangles[1], edgeTriangles[2], edgeTriangles[3], builder.filename.c_str());
           builder.flag.hasFixErrors = 1;
         }
       }
-      else if(edgeNM.triLeft != Mesh::INVALID || edgeNM.triRight != Mesh::INVALID) {
-        uint32_t triUsed = edgeNM.triRight != Mesh::INVALID ? edgeNM.triRight : edgeNM.triLeft;
+      else if((numLeftNM == 1 && numRightNM == 0) || (numLeftNM == 0 && numRightNM == 1)) {
+        uint32_t triUsed =
+            (numLeftNM == 0 && numRightNM == 1) ? mesh.edgesNM[edge.nmRight].tri : mesh.edgesNM[edge.nmLeft].tri;
+
         // 3 surfaces per edge
         // split edge
         uint32_t newA = builder.addConnection(edge.vtxA);
@@ -1109,8 +1242,6 @@ public:
             mesh.setTriangleEdgeFlags(triTemps[t], te, triTempEdgeFlags[t * 3 + te]);
           }
         }
-
-        edgeNM.triLeft = Mesh::INVALID;
       }
 
       triTemps.clear();
@@ -1120,6 +1251,74 @@ public:
     for(size_t t = 0; t < triDelete.size(); t++) {
       mesh.removeTriangle(triDelete[t]);
     }
+
+    for(size_t e = 0; e < mesh.edgesNM.size(); e++) {
+      Mesh::Edge& edge = mesh.edges[e];
+      if(edge.isNonManifold()) {
+        mesh.nonManifoldEdges = true;
+      }
+    }
+  }
+
+  static void initSimple(Mesh& mesh, Loader::BuilderPart& builder)
+  {
+    uint32_t numT = builder.triangles.size() / 3;
+    uint32_t numV = builder.positions.size();
+
+    bool nonManifold = false;
+    for(uint32_t t = 0; t < numT; t++) {
+      uint32_t nonManifoldEdge = mesh.addTriangle(t);
+
+      if(nonManifoldEdge != Mesh::INVALID) {
+        Mesh::Edge& edge = mesh.edges[nonManifoldEdge];
+
+        LdrVector normal = mesh.getTriangleNormal(t, builder.positions.data());
+
+        if(edge.triRight != Mesh::INVALID && edge.triLeft != t) {
+          LdrVector normalOther = mesh.getTriangleNormal(edge.triLeft, builder.positions.data());
+          if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
+#if defined(_DEBUG)
+            printf("nonmanifold coplanar: t %d - %s\n", t, builder.filename.c_str());
+#endif
+          }
+        }
+
+        if(edge.triRight != Mesh::INVALID && edge.triRight != t) {
+          LdrVector normalOther = mesh.getTriangleNormal(edge.triRight, builder.positions.data());
+          if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
+#if defined(_DEBUG)
+            printf("nonmanifold coplanar: t %d - %s\n", t, builder.filename.c_str());
+#endif
+          }
+        }
+        if(edge.isNonManifold()) {
+          uint32_t maxNumSide = 0;
+          for(uint32_t es = 0; es < 2; es++) {
+            uint32_t nm  = es ? edge.nmRight : edge.nmLeft;
+            uint32_t num = 0;
+            while(nm != Mesh::INVALID) {
+              uint32_t tOther = mesh.iterateEdgeNM(nm);
+              num++;
+              if(tOther != t) {
+                LdrVector normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
+                if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
+#if defined(_DEBUG)
+                  printf("nonmanifold coplanar: t %d - %s\n", t, builder.filename.c_str());
+#endif
+                }
+              }
+            }
+            maxNumSide = std::max(maxNumSide, num);
+#if defined(_DEBUG)
+            if(maxNumSide > 2)
+              printf("nonmanifold high edge side: t %d - %d - %s\n", t, maxNumSide, builder.filename.c_str());
+#endif
+          }
+        }
+      }
+      nonManifold = nonManifold || (nonManifoldEdge != Mesh::INVALID);
+    }
+    mesh.nonManifoldEdges = nonManifold;
   }
 
   static void removeDeleted(Mesh& mesh, Loader::BuilderPart& builder)
@@ -1479,7 +1678,17 @@ public:
   static void fixBuilderPart(Loader::BuilderPart& builder, const Loader::Config& config)
   {
     Mesh mesh;
-    MeshUtils::initNonManifold(mesh, builder);
+    mesh.initBasics(builder.positions.size(), builder.triangles.size() / 3, builder.triangles.data(), builder.loader);
+
+    builder.connections.resize(builder.positions.size(), LDR_INVALID_IDX);
+
+    if(!config.partFixTjunctions && !config.renderpartChamfer) {
+      MeshUtils::initSimple(mesh, builder);
+    }
+    else {
+      MeshUtils::initNonManifold(mesh, builder);
+    }
+
     MeshUtils::initEdgeLines(mesh, builder, false);
     MeshUtils::initEdgeLines(mesh, builder, true);
     if(config.partFixTjunctions) {
@@ -1759,40 +1968,26 @@ public:
     return vertex;
   }
 
-  static void buildRenderPart(Loader::BuilderRenderPart& builder, const LdrPart& part, const Loader::Config& config)
+  static void builderRenderPartSimple(Loader::BuilderRenderPart& builder, MeshFull& mesh, const LdrPart& part, const Loader::Config& config)
   {
-    builder.bbox = part.bbox;
-    builder.flag = part.flag;
+    // connectivity of unsplit mesh
+    Mesh sourceMesh;
+    Mesh renderMesh;
 
-    MeshFull mesh;
-    mesh.init(part.num_positions, part.num_triangles, part.triangles);
+    // iterate source triangles, create them in render mesh
 
-    builder.vertices.reserve(part.num_positions + part.num_lines * 2);
-    builder.lines.reserve(part.num_lines * 2);
-    builder.triangles.resize(part.num_triangles * 3, LDR_INVALID_IDX);
+    // go over triangles' source edges, find if other triangle was already created.
 
-    builder.triNormals.reserve(part.num_triangles);
+    // when creating render triangle use new render vertices if other triangle doesn't exist yet,
+    // or if there was a split edge between the two within source, of if non-manifold winding doesn't match
 
-    for(uint32_t t = 0; t < part.num_triangles; t++) {
-      builder.triNormals.push_back(mesh.getTriangleNormal(t, part.positions));
-    }
+    // push our own normal into existing vertices
 
-    // push "hard" lines
-    for(uint32_t i = 0; i < part.num_lines; i++) {
-      MeshFull::Edge* edge = mesh.getEdge(part.lines[i * 2 + 0], part.lines[i * 2 + 1]);
-      if(edge) {
-        edge->flag |= EDGE_HARD_BIT;
-      }
-    }
-#if 1
-    for(uint32_t e = 0; e < mesh.numEdges; e++) {
-      MeshFull::Edge& edge = mesh.edges[e];
-      if(!edge.isOpen() && vec_dot(builder.triNormals[edge.triLeft], builder.triNormals[edge.triRight]) < Loader::FORCED_HARD_EDGE_DOT) {
-        edge.flag |= EDGE_HARD_BIT;
-      }
-    }
-#endif
+    // run over all source edges that are purely material edges, add vertex normals of the other sides
+  }
 
+  static void builderRenderPartNonManifold(Loader::BuilderRenderPart& builder, MeshFull& mesh, const LdrPart& part, const Loader::Config& config)
+  {
     // distribute
     // find out vertex splits
     builder.vtxOutCount.resize(part.num_positions, 0);
@@ -1883,7 +2078,8 @@ public:
           }
 
           if(startIdx == ~0) {
-            assert(0 && "TODO fix this case");
+            //assert(0 && "TODO fix this case");
+            fprintf(stderr, "non manifold vertex %d - %s\n", v, builder.filename);
             startIdx = startIdx;
             break;
           }
@@ -1998,6 +2194,72 @@ public:
 
     if(config.partFixTjunctions && config.renderpartChamfer && part.flag.canChamfer) {
       chamferRenderPart(mesh, builder, part, config.renderpartChamfer);
+    }
+  }
+
+  static void buildRenderPart(Loader::BuilderRenderPart& builder, const LdrPart& part, const Loader::Config& config)
+  {
+    builder.bbox = part.bbox;
+    builder.flag = part.flag;
+
+    MeshFull mesh;
+    mesh.initFull(part.num_positions, part.num_triangles, part.triangles, builder.loader);
+
+    builder.vertices.reserve(part.num_positions + part.num_lines * 2);
+    builder.lines.reserve(part.num_lines * 2);
+    builder.triangles.resize(part.num_triangles * 3, LDR_INVALID_IDX);
+
+    builder.triNormals.reserve(part.num_triangles);
+
+    for(uint32_t t = 0; t < part.num_triangles; t++) {
+      builder.triNormals.push_back(mesh.getTriangleNormal(t, part.positions));
+    }
+
+    // push "hard" lines
+    for(uint32_t i = 0; i < part.num_lines; i++) {
+      MeshFull::Edge* edge = mesh.getEdge(part.lines[i * 2 + 0], part.lines[i * 2 + 1]);
+      if(edge) {
+        edge->flag |= EDGE_HARD_BIT;
+      }
+    }
+    for(uint32_t e = 0; e < mesh.numEdges; e++) {
+      MeshFull::Edge& edge = mesh.edges[e];
+      if(edge.isOpen())
+        continue;
+
+      if(vec_dot(builder.triNormals[edge.triLeft], builder.triNormals[edge.triRight]) < Loader::FORCED_HARD_EDGE_DOT) {
+        edge.flag |= EDGE_HARD_BIT;
+      }
+      if(part.materials[edge.triLeft] != part.materials[edge.triRight]) {
+        edge.flag |= EDGE_MATERIAL_BIT;
+      }
+      else if(edge.isNonManifold()) {
+        LdrMaterialID refMaterial = part.materials[edge.triLeft];
+        // compare all triangles against reference material
+        uint32_t nextNM = edge.nmRight;
+        while(nextNM != Mesh::INVALID) {
+          uint32_t tri = mesh.iterateEdgeNM(nextNM);
+          if(refMaterial != part.materials[tri]) {
+            edge.flag |= EDGE_MATERIAL_BIT;
+            break;
+          }
+        }
+        nextNM = edge.nmLeft;
+        while(nextNM != Mesh::INVALID) {
+          uint32_t tri = mesh.iterateEdgeNM(nextNM);
+          if(refMaterial != part.materials[tri]) {
+            edge.flag |= EDGE_MATERIAL_BIT;
+            break;
+          }
+        }
+      }
+    }
+
+    if(config.renderpartChamfer && config.partFixTjunctions) {
+      builderRenderPartNonManifold(builder, mesh, part, config);
+    }
+    else {
+      builderRenderPartSimple(builder, mesh, part, config);
     }
   }
 };
@@ -2543,9 +2805,18 @@ LdrResult Loader::loadDeferredParts(uint32_t numParts, const LdrPartID* parts, s
 
   if(inFlight) {
     for(uint32_t i = 0; i < numParts; i++) {
-      LdrPartID partid = all ? (LdrPartID)i : *(const LdrPartID*)(((const uint8_t*)parts) + partStride * i);
-      waitPart(partid);
+      LdrPartID partID = all ? (LdrPartID)i : *(const LdrPartID*)(((const uint8_t*)parts) + partStride * i);
+      waitPart(partID);
+
+      LdrResult result = m_parts[partID].loadResult;
+      if(result != LDR_SUCCESS) {
+        resultFinal = result;
+      }
     }
+  }
+
+  if(resultFinal == LDR_ERROR_FILE_NOT_FOUND) {
+    resultFinal = LDR_WARNING_PART_NOT_FOUND;
   }
 
   return resultFinal;
@@ -2641,7 +2912,7 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
     part.loadResult = LDR_ERROR_FILE_NOT_FOUND;
     return part.loadResult;
   }
-#ifdef _DEBUG
+#if defined(_DEBUG) && (LDR_DEBUG_FLAG & LDR_DEBUG_FLAG_FILELOAD)
   const char* depth_prefix = "...................";
   uint32_t    clampDepth   = (uint32_t)strlen(depth_prefix);
   printf("%sldr load data %s\n", &depth_prefix[clampDepth - std::min(depth, clampDepth)], filename);
@@ -2650,6 +2921,9 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
   BuilderPart builder;
   builder.flag.isPrimitive = isPrimitive ? 1 : 0;
   builder.filename         = filename;
+#ifdef _DEBUG
+  builder.loader = this;
+#endif
 
   BFCWinding   winding        = BFC_CCW;
   BFCCertified certified      = BFC_UNKNOWN;
@@ -2973,6 +3247,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
     }
 
     BuilderRenderPart builderRender;
+    builderRender.loader   = this;
+    builderRender.filename = part.name;
     MeshUtils::buildRenderPart(builderRender, partTemp, m_config);
     initRenderPart(renderPart, builderRender, partTemp);
 
@@ -3041,6 +3317,7 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
               found = true;
             }
             else if(result == LDR_WARNING_PART_NOT_FOUND || result == LDR_ERROR_FILE_NOT_FOUND) {
+              found       = true;
               finalResult = LDR_WARNING_PART_NOT_FOUND;
             }
             else {
@@ -3055,6 +3332,7 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
               autoResolve ? resolvePart(subfilename, false, entry, depth + 1) : deferPart(subfilename, false, entry);
           if(result == LDR_SUCCESS) {
             instance.part = entry.partID;
+            assert(instance.part != LDR_INVALID_ID);
             builder.instances.push_back(instance);
 
             if(autoResolve) {
@@ -3070,6 +3348,7 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
                   subinstance.material = instance.material;
                 }
                 subinstance.transform = mat_mul(instance.transform, subinstance.transform);
+                assert(subinstance.part != LDR_INVALID_ID);
                 builder.instances.push_back(subinstance);
                 bbox_merge(builder.bbox, subinstance.transform, getPart(subinstance.part).bbox);
               }
@@ -3604,7 +3883,6 @@ void Loader::compactBuilderPart(BuilderPart& builder)
   builder.positions.resize(numVerticesNew);
 
 #if _DEBUG
-  printf("ldraw compaction: %d\n", uint32_t(numVertices - numVerticesNew));
 #if 0
     float minDist = FLT_MAX;
 
@@ -3658,6 +3936,9 @@ void Loader::fixPart(LdrPartID partid)
 
   if(!(part.flag.isPrimitive || part.flag.isSubpart)) {
     BuilderPart builder;
+#ifdef _DEBUG
+    builder.loader = this;
+#endif
     fillBuilderPart(builder, partid);
 
     deinitPart(part);
@@ -3678,10 +3959,13 @@ void Loader::buildRenderPart(LdrPartID partid)
   }
   else {
     BuilderRenderPart builder;
+    builder.loader   = this;
+    builder.filename = m_parts[partid].name;
     if(m_config.partFixMode == LDR_PART_FIX_NONE) {
       LdrPart parttemp;
 
       BuilderPart builderPart;
+      builderPart.loader = this;
       fillBuilderPart(builderPart, partid);
       MeshUtils::fixBuilderPart(builderPart, m_config);
       initPart(parttemp, builderPart);
@@ -3997,22 +4281,22 @@ LDR_API uint32_t ldrGetNumRegisteredMaterials(LdrLoaderHDL loader)
 LDR_API const LdrMaterial* ldrGetMaterial(LdrLoaderHDL loader, LdrMaterialID idx)
 {
   ldr::Loader* lldr = (ldr::Loader*)loader;
-  return &lldr->getMaterial(idx);
+  return lldr->getMaterialP(idx);
 }
 LDR_API const LdrPart* ldrGetPart(LdrLoaderHDL loader, LdrPartID idx)
 {
   ldr::Loader* lldr = (ldr::Loader*)loader;
-  return &lldr->getPart(idx);
+  return lldr->getPartP(idx);
 }
 LDR_API const LdrPart* ldrGetPrimitive(LdrLoaderHDL loader, LdrPrimitiveID idx)
 {
   ldr::Loader* lldr = (ldr::Loader*)loader;
-  return &lldr->getPrimitive(idx);
+  return lldr->getPrimitiveP(idx);
 }
 LDR_API const LdrRenderPart* ldrGetRenderPart(LdrLoaderHDL loader, LdrPartID idx)
 {
   ldr::Loader* lldr = (ldr::Loader*)loader;
-  return &lldr->getRenderPart(idx);
+  return lldr->getRenderPartP(idx);
 }
 
 #endif
