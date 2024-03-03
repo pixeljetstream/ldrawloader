@@ -199,7 +199,7 @@ const float Loader::NO_AREA_TRIANGLE_DOT  = 0.9999f;
 const float Loader::FORCED_HARD_EDGE_DOT  = 0.2f;
 const float Loader::CHAMFER_PARALLEL_DOT  = 0.999f;
 const float Loader::ANGLE_45_DOT          = 0.7071f;
-const float Loader::MIN_MERGE_EPSILON     = 0.005f;  // 1 LDU ~ 0.4mm
+const float Loader::MIN_MERGE_EPSILON     = 0.015f;  // 1 LDU ~ 0.4mm
 
 
 template <class TvtxIndex_t, class TvtxIndexPair, int VTX_BITS, int VTX_TRIS>
@@ -3091,8 +3091,13 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
 
         material = fixupMaterialID(material);
 
+        float distA = vec_length(vec_sub(vecB, vecA));
+        float distB = vec_length(vec_sub(vecC, vecB));
+        float distC = vec_length(vec_sub(vecA, vecC));
+        float dist  = std::min(std::min(distA, distB), distC);
+
         float dotA = fabsf(vec_dot(vec_normalize(vec_sub(vecB, vecA)), vec_normalize(vec_sub(vecC, vecA))));
-        if(dotA <= Loader::NO_AREA_TRIANGLE_DOT) {
+        if(dotA <= Loader::NO_AREA_TRIANGLE_DOT && dist > Loader::MIN_MERGE_EPSILON) {
           uint32_t vidx = (uint32_t)builder.positions.size();
           // normalize to ccw
           if(winding == BFC_CW) {
@@ -3112,9 +3117,9 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           builder.materials.push_back(material);
           builder.quads.push_back(LDR_INVALID_IDX);
 
-          builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecA, vecB)));
-          builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecB, vecC)));
-          builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecC, vecA)));
+          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecA, vecB)));
+          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecB, vecC)));
+          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecC, vecA)));
         }
       } break;
       case 4: {
@@ -3177,10 +3182,10 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           builder.quads.push_back(tidx);
           builder.quads.push_back(tidx);
 
-          builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecA, vecB)));
-          builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecB, vecC)));
-          builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecC, vecD)));
-          builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecD, vecA)));
+          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecA, vecB)));
+          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecB, vecC)));
+          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecC, vecD)));
+          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecD, vecA)));
         }
       } break;
       case 5: {
@@ -3521,11 +3526,17 @@ public:
     }
   }
 
-  static size_t applyRemap3(size_t numIndices, LdrVertexIndex* indices, const uint32_t* LDR_RESTRICT remap)
+  static size_t applyRemap3(size_t numIndices, LdrVertexIndex* indices, LdrMaterialID* materials, uint32_t* quads, const uint32_t* LDR_RESTRICT remap)
   {
-    size_t outIndices = 0;
-    for(size_t i = 0; i < numIndices / 3; i++) {
-      uint32_t orig[3];
+    size_t   outIndices   = 0;
+    size_t   outTri       = 0;
+    size_t   numTri       = numIndices / 3;
+    uint32_t skipped      = 0;
+    bool     prevWasValid = false;
+    for(size_t i = 0; i < numTri; i++) {
+      uint32_t      origQuad     = quads[i];
+      LdrMaterialID origMaterial = materials[i];
+      uint32_t      orig[3];
       orig[0] = indices[i * 3 + 0];
       orig[1] = indices[i * 3 + 1];
       orig[2] = indices[i * 3 + 2];
@@ -3535,14 +3546,32 @@ public:
       newIdx[1] = remap[orig[1]];
       newIdx[2] = remap[orig[2]];
 
-      if(newIdx[0] == newIdx[1] || newIdx[1] == newIdx[2] || newIdx[2] == newIdx[0])
+      if(newIdx[0] == newIdx[1] || newIdx[1] == newIdx[2] || newIdx[2] == newIdx[0]) {
+        // tell other triangle it's no longer a quad
+        if(origQuad != LDR_INVALID_IDX) {
+          // we are the first, then disable state for next
+          if(origQuad == i) {
+            quads[i + 1] = LDR_INVALID_IDX;
+          }  // we are second, then disable for previous
+          else if(origQuad == i - 1 && prevWasValid) {
+            quads[outTri - 1] = LDR_INVALID_IDX;
+          }
+        }
+
+        skipped++;
+        prevWasValid = false;
         continue;
+      }
 
       indices[outIndices + 0] = newIdx[0];
       indices[outIndices + 1] = newIdx[1];
       indices[outIndices + 2] = newIdx[2];
+      materials[outTri]       = origMaterial;
+      quads[outTri]           = origQuad == LDR_INVALID_IDX ? LDR_INVALID_IDX : origQuad - skipped;
 
       outIndices += 3;
+      outTri++;
+      prevWasValid = true;
     }
 
     return outIndices;
@@ -3847,7 +3876,7 @@ void Loader::compactBuilderPart(BuilderPart& builder)
   std::sort(sortedVertices.begin(), sortedVertices.end(), SortVertex_cmp);
 
   // merge using minimal edge length
-  const float epsilon = std::min(MIN_MERGE_EPSILON, builder.minEdgeLength * 0.9f);
+  const float epsilon = MIN_MERGE_EPSILON; //  std::min(MIN_MERGE_EPSILON, builder.minEdgeLength * 0.9f);
 
   // line sweep merge
   size_t     mergeBegin = 1;
@@ -3903,11 +3932,14 @@ void Loader::compactBuilderPart(BuilderPart& builder)
 
   size_t lineSize = Utils::applyRemap2(builder.lines.size(), builder.lines.data(), remapMerge.data());
   size_t optionalSize = Utils::applyRemap2(builder.optional_lines.size(), builder.optional_lines.data(), remapMerge.data());
-  size_t triangleSize = Utils::applyRemap3(builder.triangles.size(), builder.triangles.data(), remapMerge.data());
+  size_t triangleSize = Utils::applyRemap3(builder.triangles.size(), builder.triangles.data(), builder.materials.data(),
+                                           builder.quads.data(), remapMerge.data());
 
   builder.lines.resize(lineSize);
   builder.optional_lines.resize(optionalSize);
   builder.triangles.resize(triangleSize);
+  builder.materials.resize(triangleSize / 3);
+  builder.quads.resize(triangleSize / 3);
 }
 
 
