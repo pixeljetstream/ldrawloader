@@ -292,6 +292,7 @@ public:
   {
     uint32_t tri    = INVALID;
     uint32_t nextNM = INVALID;
+    float    angle  = 0;
   };
 
   struct Edge
@@ -303,6 +304,7 @@ public:
     vtxIndex_t vtxB;
     uint32_t   triLeft;
     uint32_t   triRight;
+    float      angleRight = 0;
     uint32_t   flag;
     uint32_t   nmLeft;
     uint32_t   nmRight;
@@ -877,7 +879,7 @@ public:
     resizeVertices(numV);
   }
 
-  bool initFull(uint32_t numV, uint32_t numT, vtxIndex_t* tris, Loader* _loader)
+  bool initFull(uint32_t numV, uint32_t numT, vtxIndex_t* tris, const LdrVector* positions, Loader* _loader)
   {
     bool nonManifold = false;
     initBasics(numV, numT, tris, _loader);
@@ -886,7 +888,114 @@ public:
       nonManifold = (addTriangle(t) != INVALID) || nonManifold;
     }
 
+    if(nonManifold) {
+      orderNonManifoldByAngle(positions);
+    }
+
     return nonManifold;
+  }
+
+  float getEdgeAngle(LdrVector posA, LdrVector vecX0, LdrVector vecX1, const LdrVector* positions, uint32_t t, const Edge& edge)
+  {
+    LdrVector posC  = positions[getTriangleOtherVertex(t, edge)];
+    LdrVector vecCA = vec_normalize(vec_sub(posC, posA));
+    float     dot0  = vec_dot(vecX0, vecCA); // perpendicular to triLeft plane
+    float     dot1  = vec_dot(vecX1, vecCA); // in triLeft plane
+    
+    // FIXME proper math
+    return dot0 + dot1;
+  }
+
+  struct SortedEdge
+  {
+    float angle;
+    float tri;
+    bool  left;
+
+    static bool comparator(const SortedEdge& a, const SortedEdge& b) { return a.angle < b.angle; }
+  };
+
+  void orderNonManifoldByAngle(const LdrVector* positions)
+  {
+    Loader::TVector<SortedEdge> sortedEdges;
+    sortedEdges.reserve(128);
+
+    for(uint32_t e = 0; e < numEdges; e++) {
+      MeshFull::Edge& edge = edges[e];
+      if(!(edge.flag & EDGE_NONMANIFOLD))
+        continue;
+
+      LdrVector posA = positions[edge.vtxA];
+      LdrVector posB = positions[edge.vtxB];
+      LdrVector posC = positions[getTriangleOtherVertex(edge.triLeft, edge)];
+
+      LdrVector vecBA = vec_normalize(vec_sub(posB, posA));
+      LdrVector vecCA = vec_normalize(vec_sub(posC, posA));
+      LdrVector vecX0 = vec_normalize(vec_cross(vecBA, vecCA));
+      LdrVector vecX1 = vec_normalize(vec_cross(vecBA, vecX0));
+
+      sortedEdges.clear();
+
+      // compute angles and push into sorting queue
+
+      if(edge.triRight != INVALID) {
+        SortedEdge sedge;
+        sedge.angle = getEdgeAngle(posA, vecX0, vecX1, positions, edge.triRight, edge);
+        sedge.left  = false;
+        sedge.tri   = edge.triRight;
+        sortedEdges.push_back(sedge);
+      }
+
+      uint32_t nextNM = edge.nmLeft;
+      while(nextNM != Mesh::INVALID) {
+        const EdgeNM& edgeNM = edgesNM[nextNM];
+        SortedEdge    sedge;
+        sedge.angle = getEdgeAngle(posA, vecX0, vecX1, positions, edgeNM.tri, edge);
+        sedge.left  = true;
+        sedge.tri   = edge.triRight;
+        sortedEdges.push_back(sedge);
+        nextNM = edgeNM.nextNM;
+      }
+
+      nextNM = edge.nmRight;
+      while(nextNM != Mesh::INVALID) {
+        const EdgeNM& edgeNM = edgesNM[nextNM];
+        SortedEdge    sedge;
+        sedge.angle = getEdgeAngle(posA, vecX0, vecX1, positions, edgeNM.tri, edge);
+        sedge.left  = false;
+        sedge.tri   = edge.triRight;
+        sortedEdges.push_back(sedge);
+        nextNM = edgeNM.nextNM;
+      }
+
+      std::sort(sortedEdges.data(), sortedEdges.data() + sortedEdges.size(), SortedEdge::comparator);
+
+      uint32_t nextLeftNM  = edge.nmLeft;
+      uint32_t nextRightNM = edge.nmRight;
+      edge.triRight        = INVALID;
+
+      for(uint32_t se = 0; se < sortedEdges.size(); se++) {
+        const SortedEdge& sedge = sortedEdges[se];
+        if(sedge.left) {
+          EdgeNM& edgeNM = edgesNM[nextLeftNM];
+          edgeNM.angle   = sedge.angle;
+          edgeNM.tri     = sedge.tri;
+          nextLeftNM     = edgeNM.nextNM;
+        }
+        else {
+          if(edge.triRight == INVALID) {
+            edge.triRight   = sedge.tri;
+            edge.angleRight = sedge.angle;
+          }
+          else {
+            EdgeNM& edgeNM = edgesNM[nextRightNM];
+            edgeNM.angle   = sedge.angle;
+            edgeNM.tri     = sedge.tri;
+            nextRightNM    = edgeNM.nextNM;
+          }
+        }
+      }
+    }
   }
 };
 
@@ -1278,7 +1387,7 @@ public:
           LdrVector normalOther = mesh.getTriangleNormal(edge.triLeft, builder.positions.data());
           if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
 #if defined(_DEBUG)
-            printf("nonmanifold coplanar: t %d - %s\n", t, builder.filename.c_str());
+            printf("nonmanifold coplanar: t %d %d - %s\n", t, edge.triLeft, builder.filename.c_str());
 #endif
           }
         }
@@ -1287,7 +1396,7 @@ public:
           LdrVector normalOther = mesh.getTriangleNormal(edge.triRight, builder.positions.data());
           if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
 #if defined(_DEBUG)
-            printf("nonmanifold coplanar: t %d - %s\n", t, builder.filename.c_str());
+            printf("nonmanifold coplanar: t %d %d - %s\n", t, edge.triRight, builder.filename.c_str());
 #endif
           }
         }
@@ -1303,7 +1412,7 @@ public:
                 LdrVector normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
                 if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
 #if defined(_DEBUG)
-                  printf("nonmanifold coplanar: t %d - %s\n", t, builder.filename.c_str());
+                  printf("nonmanifold coplanar: t %d %d- %s\n", t, tOther, builder.filename.c_str());
 #endif
                 }
               }
@@ -1875,7 +1984,7 @@ public:
         uint32_t lastIndex        = builder.vertices.size();
         if(outTriangleCount > 2) {
           avgNormal = vec_normalize(avgNormal);
-          builder.vertices.push_back({vec_mul(avgPos, 1.0f / float(outCount)), avgNormal});
+          builder.vertices.push_back({vec_mul(avgPos, 1.0f / float(outCount)), 0, avgNormal});
         }
 
         for(uint32_t t = 0; t < outTriangleCount; t++) {
@@ -1971,19 +2080,71 @@ public:
   static void builderRenderPartSimple(Loader::BuilderRenderPart& builder, MeshFull& mesh, const LdrPart& part, const Loader::Config& config)
   {
     // connectivity of unsplit mesh
-    Mesh sourceMesh;
-    Mesh renderMesh;
+
+    uint32_t splitFlag = EDGE_HARD_BIT | (config.renderpartVertexMaterials ? EDGE_MATERIAL_BIT : 0);
 
     // iterate source triangles, create them in render mesh
+    for(uint32_t t = 0; t < mesh.numTriangles; t++) {
 
-    // go over triangles' source edges, find if other triangle was already created.
+      MeshFull::vtxIndex_t newIndices[3] = {LDR_INVALID_IDX, LDR_INVALID_IDX, LDR_INVALID_IDX};
 
-    // when creating render triangle use new render vertices if other triangle doesn't exist yet,
-    // or if there was a split edge between the two within source, of if non-manifold winding doesn't match
+      // go over triangles' source edges, find if other triangles were already created.
+      for(uint32_t te = 0; te < 3; te++) {
+        MeshFull::vtxIndex_t va = mesh.triangles[t * 3 + te];
+        MeshFull::vtxIndex_t vb = mesh.triangles[t * 3 + ((te + 1) % 3)];
 
-    // push our own normal into existing vertices
+        const MeshFull::Edge* edge = mesh.getEdge(va, vb);
+
+        // when creating render triangle use new render vertices if other triangle doesn't exist yet,
+        // or if there was a split edge between the two within source, of if non-manifold winding doesn't match
+
+        {
+          uint32_t otherT = edge->otherTri(t);
+          if(otherT != MeshFull::INVALID && !(edge->flag & splitFlag)) {
+            newIndices[te]           = builder.triangles[otherT * 3 + mesh.findTriangleVertex(otherT, va)];
+            newIndices[(te + 1) % 3] = builder.triangles[otherT * 3 + mesh.findTriangleVertex(otherT, vb)];
+          }
+        }
+      }
+
+      for(uint32_t k = 0; k < 3; k++) {
+        if(newIndices[k] == LDR_INVALID_IDX) {
+          builder.triangles[t * 3 + k] = uint32_t(builder.vertices.size());
+          LdrRenderVertex rvertex      = make_vertex(part.positions[mesh.triangles[t * 3 + k]], builder.triNormals[t]);
+          rvertex.material             = part.materials ? part.materials[t] : LDR_MATERIALID_INHERIT;
+          builder.vertices.push_back(rvertex);
+        }
+        else {
+          // push our own normal into existing vertices
+          builder.triangles[t * 3 + k] = newIndices[k];
+          builder.vertices[newIndices[k]].normal = vec_add(builder.vertices[newIndices[k]].normal, builder.triNormals[t]);
+        }
+      }
+    }
 
     // run over all source edges that are purely material edges, add vertex normals of the other sides
+    if(config.renderpartVertexMaterials) {
+      for(uint32_t e = 0; e < mesh.numEdges; e++) {
+        const MeshFull::Edge& edge = mesh.edges[e];
+        if(!edge.isOpen() && (edge.flag & EDGE_MATERIAL_BIT) && !(edge.flag & (EDGE_HARD_BIT | EDGE_NONMANIFOLD))) {
+          uint32_t vLeftA = builder.triangles[edge.triLeft + mesh.findTriangleVertex(edge.triLeft, edge.vtxA)];
+          uint32_t vLeftB = builder.triangles[edge.triLeft + mesh.findTriangleVertex(edge.triLeft, edge.vtxB)];
+
+          uint32_t vRightA = builder.triangles[edge.triLeft + mesh.findTriangleVertex(edge.triRight, edge.vtxA)];
+          uint32_t vRightB = builder.triangles[edge.triLeft + mesh.findTriangleVertex(edge.triRight, edge.vtxB)];
+
+          builder.vertices[vLeftA].normal  = vec_add(builder.vertices[vLeftA].normal, builder.vertices[vRightA].normal);
+          builder.vertices[vLeftB].normal  = vec_add(builder.vertices[vLeftB].normal, builder.vertices[vRightB].normal);
+          builder.vertices[vRightA].normal = builder.vertices[vLeftA].normal;
+          builder.vertices[vRightB].normal = builder.vertices[vLeftB].normal;
+        }
+      }
+    }
+
+    // normalize all vertex normals
+    for(uint32_t v = 0; v < builder.vertices.size(); v++) {
+      builder.vertices[v].normal = vec_normalize(builder.vertices[v].normal);
+    }
   }
 
   static void builderRenderPartNonManifold(Loader::BuilderRenderPart& builder, MeshFull& mesh, const LdrPart& part, const Loader::Config& config)
@@ -2203,7 +2364,7 @@ public:
     builder.flag = part.flag;
 
     MeshFull mesh;
-    mesh.initFull(part.num_positions, part.num_triangles, part.triangles, builder.loader);
+    mesh.initFull(part.num_positions, part.num_triangles, part.triangles, part.positions, builder.loader);
 
     builder.vertices.reserve(part.num_positions + part.num_lines * 2);
     builder.lines.reserve(part.num_lines * 2);
@@ -3876,7 +4037,7 @@ void Loader::compactBuilderPart(BuilderPart& builder)
   std::sort(sortedVertices.begin(), sortedVertices.end(), SortVertex_cmp);
 
   // merge using minimal edge length
-  const float epsilon = MIN_MERGE_EPSILON; //  std::min(MIN_MERGE_EPSILON, builder.minEdgeLength * 0.9f);
+  const float epsilon = MIN_MERGE_EPSILON;  //  std::min(MIN_MERGE_EPSILON, builder.minEdgeLength * 0.9f);
 
   // line sweep merge
   size_t     mergeBegin = 1;
@@ -4177,7 +4338,7 @@ LDR_API void ldrGetDefaultCreateInfo(LdrLoaderCreateInfo* info)
   info->renderpartBuildMode = LDR_RENDERPART_BUILD_ONLOAD;
   info->renderpartChamfer   = 0.35f;
   //info->renderpartTriangleMaterials = LDR_TRUE;
-  //info->renderpartVertexMaterials   = LDR_TRUE;
+  info->renderpartVertexMaterials = LDR_TRUE;
 }
 
 LDR_API LdrResult ldrCreateLoader(const LdrLoaderCreateInfo* info, LdrLoaderHDL* pLoader)

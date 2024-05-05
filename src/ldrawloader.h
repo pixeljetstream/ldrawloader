@@ -332,9 +332,9 @@ typedef struct LdrModel
 typedef struct LdrRenderVertex
 {
   LdrVector position;
-  //LdrMaterialID material; // validity depends on LdrLoaderCreateInfo::renderpartVertexMaterials
+  LdrMaterialID material; // validity depends on LdrLoaderCreateInfo::renderpartVertexMaterials
   LdrVector normal;
-  //uint32_t      _pad;
+  uint32_t      _pad;
 } LdrRenderVertex;
 
 // LdrRenderPart is the renderable version of a (non-Primitive) LdrPart.
@@ -434,7 +434,7 @@ typedef struct LdrLoaderCreateInfo
 
   // TODO allow pervertex splits based on materials
   //LdrBool32 renderpartTriangleMaterials;  // keeps triangle materials array
-  //LdrBool32 renderpartVertexMaterials;    // split vertices on material edges, not yet implemented
+  LdrBool32 renderpartVertexMaterials;    // split vertices on material edges
 
   LdrRenderPartBuildMode renderpartBuildMode;
 
