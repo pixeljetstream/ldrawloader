@@ -292,6 +292,7 @@ public:
   {
     uint32_t tri    = INVALID;
     uint32_t nextNM = INVALID;
+    bool     isLeft = true;
     float    angle  = 0;
   };
 
@@ -306,13 +307,12 @@ public:
     uint32_t   triRight;
     float      angleRight = 0;
     uint32_t   flag;
-    uint32_t   nmLeft;
-    uint32_t   nmRight;
+    uint32_t   nmList;
 
     bool isNonManifold() const
     {
       bool state = (flag & EDGE_NONMANIFOLD) != 0;
-      assert(state == (nmLeft != INVALID || nmRight != INVALID));
+      assert(state == (nmList != INVALID));
       return state;
     }
 
@@ -334,12 +334,13 @@ public:
   };
 
 
-  uint32_t numVertices         = 0;
-  uint32_t numTriangles        = 0;
-  uint32_t numEdges            = 0;
-  uint32_t freeNM              = INVALID;
-  bool     nonManifoldEdges    = false;
-  bool     nonManifoldVertices = false;
+  uint32_t numVertices              = 0;
+  uint32_t numTriangles             = 0;
+  uint32_t numEdges                 = 0;
+  uint32_t freeNM                   = INVALID;
+  bool     nonManifoldEdges         = false;
+  bool     nonManifoldVertices      = false;
+  bool     nonManifoldNeedsOrdering = false;
 
   vtxIndex_t* triangles = nullptr;
 
@@ -415,6 +416,17 @@ public:
     uint32_t idxC = triangles[t * 3 + 2];
 
     return vec_normalize(vec_cross(vec_sub(positions[idxB], positions[idxA]), vec_sub(positions[idxC], positions[idxA])));
+  }
+
+  // accounts for non-manifold edges
+  inline uint32_t getBestOtherTriangle(uint32_t t, const Edge& edge) const
+  {
+    if(edge.isNonManifold()) {
+      // find in nm edge list
+    }
+    else {
+      return edge.otherTri(t);
+    }
   }
 
   inline const vtxIndex_t getTriangleOtherVertex(uint32_t t, const Edge& edge) const
@@ -502,7 +514,7 @@ public:
     return edgePrevIndex;
   }
 
-  uint32_t addEdgeNM(uint32_t startNM, uint32_t tri)
+  uint32_t addEdgeNM(uint32_t startNM, uint32_t tri, bool isLeft)
   {
     uint32_t nextNM = startNM;
 
@@ -521,43 +533,45 @@ public:
 
       edgesNM[outNextNM].tri    = tri;
       edgesNM[outNextNM].nextNM = startNM;
+      edgesNM[outNextNM].isLeft = isLeft;
     }
     else {
       outNextNM = edgesNM.size();
-      edgesNM.push_back({tri, startNM});
+      edgesNM.push_back({tri, startNM, isLeft, 0});
     }
 
     return outNextNM;
   }
 
-  uint32_t popEdgeNM(uint32_t& startNM)
+  uint32_t findFirstEdgeNM(uint32_t nextNM, bool isLeft) const
   {
-    if(startNM != INVALID) {
-      EdgeNM&  edgeNM  = edgesNM[startNM];
-      uint32_t current = startNM;
-      // change list head
-      startNM      = edgeNM.nextNM;
-      uint32_t tri = edgeNM.tri;
-      // insert into freelist
-      edgeNM.nextNM = freeNM;
-      edgeNM.tri    = INVALID;
-      freeNM        = current;
+    while(nextNM != INVALID) {
+      const EdgeNM& edgeNM = edgesNM[nextNM];
+      if(edgeNM.isLeft == isLeft) {
+        return edgeNM.tri;
+      }
+      nextNM = edgeNM.nextNM;
+    }
 
-      return tri;
-    }
-    else {
-      return INVALID;
-    }
+    return INVALID;
   }
 
-  uint32_t iterateEdgeNM(uint32_t& startNM) const
+  const EdgeNM* iterateEdgeNM(uint32_t& startNM) const
   {
     if(startNM != INVALID) {
-      const EdgeNM& edgeNM = edgesNM[startNM];
-      startNM              = edgeNM.nextNM;
-      return edgeNM.tri;
+      startNM = edgesNM[startNM].nextNM;
+      return &edgesNM[startNM];
     }
-    return INVALID;
+    return nullptr;
+  }
+
+  EdgeNM* iterateEdgeNM(uint32_t& startNM)
+  {
+    if(startNM != INVALID) {
+      startNM = edgesNM[startNM].nextNM;
+      return &edgesNM[startNM];
+    }
+    return nullptr;
   }
 
   bool removeEdgeNM(uint32_t& startNM, uint32_t tri)
@@ -591,14 +605,15 @@ public:
     return false;
   }
 
-  uint32_t countEdgeNM(uint32_t startNM) const
+  uint32_t countEdgeNM(uint32_t startNM, bool isLeft) const
   {
     uint32_t count  = 0;
     uint32_t nextNM = startNM;
 
     while(nextNM != INVALID) {
       const EdgeNM& edgeNM = edgesNM[nextNM];
-      count++;
+      if(edgeNM.isLeft == isLeft)
+        count++;
 
       nextNM = edgeNM.nextNM;
     }
@@ -620,16 +635,12 @@ public:
         edge.triRight = tri;
       }
       else {
-        if(edge.vtxA == vtxA) {
-          edge.nmLeft = addEdgeNM(edge.nmLeft, tri);
-        }
-        else {
-          edge.nmRight = addEdgeNM(edge.nmRight, tri);
-        }
+        edge.nmList = addEdgeNM(edge.nmList, tri, edge.vtxA == vtxA);
 
         edge.flag |= EDGE_NONMANIFOLD;
 
         nonManifold = it->second;
+        nonManifoldNeedsOrdering = true;
       }
 
       return it->second;
@@ -677,30 +688,37 @@ public:
       }
     }
     else {
-      if(edge.vtxA == vtxA) {
-        if(edge.triLeft == tri) {
-          edge.triLeft = popEdgeNM(edge.nmLeft);
-        }
-        else {
-          removeEdgeNM(edge.nmLeft, tri);
-        }
+      bool isLeft   = edge.vtxA == vtxA;
+      bool popFirst = edge.triLeft == tri || edge.triRight == tri;
+
+      uint32_t first     = popFirst ? findFirstEdgeNM(edge.nmList, isLeft) : 0;
+      uint32_t removeTri = tri;
+
+      // find first with matching state
+      if(edge.triLeft == tri) {
+        edge.triLeft = first;
+        removeTri    = first;
+        nonManifoldNeedsOrdering = true;
       }
-      else {
-        if(edge.triRight == tri) {
-          edge.triRight = popEdgeNM(edge.nmRight);
-        }
-        else {
-          removeEdgeNM(edge.nmRight, tri);
-        }
+      else if(edge.triRight == tri) {
+        edge.triRight = first;
+        removeTri     = first;
       }
 
-      // if only right left, migrate right to left
+      removeEdgeNM(edge.nmList, removeTri);
+
+      // if only right exist, migrate right to left
       if(edge.triLeft == INVALID && edge.triRight != INVALID) {
         edge.triLeft  = edge.triRight;
         uint32_t temp = edge.vtxB;
         edge.vtxB     = edge.vtxA;
         edge.vtxA     = temp;
         edge.triRight = INVALID;
+        // flip left/right in edgeNM list
+        uint32_t nextNM = edge.nmList;
+        while(nextNM != INVALID) {
+          iterateEdgeNM(nextNM)->isLeft ^= true;
+        }
       }
       else if(edge.triLeft == INVALID) {
         vtxEdges.remove(edge.vtxA, it->second);
@@ -709,7 +727,7 @@ public:
         lookupEdge.erase(pair);
       }
 
-      if(edge.nmLeft == INVALID && edge.nmRight == INVALID)
+      if(edge.nmList == INVALID)
         edge.flag &= ~EDGE_NONMANIFOLD;
     }
   }
@@ -899,24 +917,25 @@ public:
   {
     LdrVector posC  = positions[getTriangleOtherVertex(t, edge)];
     LdrVector vecCA = vec_normalize(vec_sub(posC, posA));
-    float     dot0  = vec_dot(vecX0, vecCA); // perpendicular to triLeft plane
-    float     dot1  = vec_dot(vecX1, vecCA); // in triLeft plane
-    
-    // FIXME proper math
-    return dot0 + dot1;
+    float     x     = vec_dot(vecX0, vecCA);  // perpendicular to triLeft plane
+    float     y     = vec_dot(vecX1, vecCA);  // in triLeft plane
+
+    return atan2f(y, x);
   }
 
   struct SortedEdge
   {
     float angle;
     float tri;
-    bool  left;
+    bool  isLeft;
 
     static bool comparator(const SortedEdge& a, const SortedEdge& b) { return a.angle < b.angle; }
   };
 
   void orderNonManifoldByAngle(const LdrVector* positions)
   {
+    if (!nonManifoldNeedsOrdering) return;
+
     Loader::TVector<SortedEdge> sortedEdges;
     sortedEdges.reserve(128);
 
@@ -940,62 +959,46 @@ public:
 
       if(edge.triRight != INVALID) {
         SortedEdge sedge;
-        sedge.angle = getEdgeAngle(posA, vecX0, vecX1, positions, edge.triRight, edge);
-        sedge.left  = false;
-        sedge.tri   = edge.triRight;
+        sedge.angle  = getEdgeAngle(posA, vecX0, vecX1, positions, edge.triRight, edge);
+        sedge.isLeft = false;
+        sedge.tri    = edge.triRight;
         sortedEdges.push_back(sedge);
       }
 
-      uint32_t nextNM = edge.nmLeft;
+      uint32_t nextNM = edge.nmList;
       while(nextNM != Mesh::INVALID) {
         const EdgeNM& edgeNM = edgesNM[nextNM];
         SortedEdge    sedge;
-        sedge.angle = getEdgeAngle(posA, vecX0, vecX1, positions, edgeNM.tri, edge);
-        sedge.left  = true;
-        sedge.tri   = edge.triRight;
-        sortedEdges.push_back(sedge);
-        nextNM = edgeNM.nextNM;
-      }
-
-      nextNM = edge.nmRight;
-      while(nextNM != Mesh::INVALID) {
-        const EdgeNM& edgeNM = edgesNM[nextNM];
-        SortedEdge    sedge;
-        sedge.angle = getEdgeAngle(posA, vecX0, vecX1, positions, edgeNM.tri, edge);
-        sedge.left  = false;
-        sedge.tri   = edge.triRight;
+        sedge.angle  = getEdgeAngle(posA, vecX0, vecX1, positions, edgeNM.tri, edge);
+        sedge.isLeft = edgeNM.isLeft;
+        sedge.tri    = edge.triRight;
         sortedEdges.push_back(sedge);
         nextNM = edgeNM.nextNM;
       }
 
       std::sort(sortedEdges.data(), sortedEdges.data() + sortedEdges.size(), SortedEdge::comparator);
 
-      uint32_t nextLeftNM  = edge.nmLeft;
-      uint32_t nextRightNM = edge.nmRight;
-      edge.triRight        = INVALID;
+      nextNM        = edge.nmList;
+      edge.triRight = INVALID;
 
       for(uint32_t se = 0; se < sortedEdges.size(); se++) {
         const SortedEdge& sedge = sortedEdges[se];
-        if(sedge.left) {
-          EdgeNM& edgeNM = edgesNM[nextLeftNM];
-          edgeNM.angle   = sedge.angle;
-          edgeNM.tri     = sedge.tri;
-          nextLeftNM     = edgeNM.nextNM;
+
+        if(!sedge.isLeft && edge.triRight == INVALID) {
+          edge.triRight   = sedge.tri;
+          edge.angleRight = sedge.angle;
         }
         else {
-          if(edge.triRight == INVALID) {
-            edge.triRight   = sedge.tri;
-            edge.angleRight = sedge.angle;
-          }
-          else {
-            EdgeNM& edgeNM = edgesNM[nextRightNM];
-            edgeNM.angle   = sedge.angle;
-            edgeNM.tri     = sedge.tri;
-            nextRightNM    = edgeNM.nextNM;
-          }
+          EdgeNM& edgeNM = edgesNM[nextNM];
+          edgeNM.angle   = sedge.angle;
+          edgeNM.tri     = sedge.tri;
+          edgeNM.isLeft  = sedge.isLeft;
+          nextNM         = edgeNM.nextNM;
         }
       }
     }
+
+    nonManifoldNeedsOrdering = false;
   }
 };
 
@@ -1019,6 +1022,7 @@ public:
     uint32_t numT = builder.triangles.size() / 3;
     uint32_t numV = builder.positions.size();
 
+#if 0
 
     bool nonManifold = false;
     for(uint32_t t = 0; t < numT; t++) {
@@ -1132,8 +1136,8 @@ public:
         continue;
       }
 
-      uint32_t numLeftNM  = mesh.countEdgeNM(edge.nmLeft);
-      uint32_t numRightNM = mesh.countEdgeNM(edge.nmRight);
+      uint32_t numLeftNM  = mesh.countEdgeNM(edge.nmList,true);
+      uint32_t numRightNM = mesh.countEdgeNM(edge.nmList,false);
 
       if(numLeftNM == 1 && numRightNM == 1) {
 
@@ -1142,7 +1146,7 @@ public:
         // into vtxA and vtxB connections.
 
         // We prefer to split the vertex at the opposite side of the average normal (see normal dot later)
-
+       
         uint32_t edgeTriangles[4] = {edge.triLeft, edge.triRight, mesh.edgesNM[edge.nmLeft].tri,
                                      mesh.edgesNM[edge.nmRight].tri};
 
@@ -1367,6 +1371,7 @@ public:
         mesh.nonManifoldEdges = true;
       }
     }
+#endif
   }
 
   static void initSimple(Mesh& mesh, Loader::BuilderPart& builder)
@@ -1401,28 +1406,26 @@ public:
           }
         }
         if(edge.isNonManifold()) {
-          uint32_t maxNumSide = 0;
-          for(uint32_t es = 0; es < 2; es++) {
-            uint32_t nm  = es ? edge.nmRight : edge.nmLeft;
-            uint32_t num = 0;
-            while(nm != Mesh::INVALID) {
-              uint32_t tOther = mesh.iterateEdgeNM(nm);
-              num++;
-              if(tOther != t) {
-                LdrVector normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
-                if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
+          uint32_t numLeft = 0;
+          uint32_t num     = 0;
+          uint32_t nextNM  = edge.nmList;
+          while(nextNM != Mesh::INVALID) {
+            uint32_t tOther = mesh.iterateEdgeNM(nextNM)->tri;
+            num++;
+            if(tOther != t) {
+              LdrVector normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
+              if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
 #if defined(_DEBUG)
-                  printf("nonmanifold coplanar: t %d %d- %s\n", t, tOther, builder.filename.c_str());
+                printf("nonmanifold coplanar: t %d %d- %s\n", t, tOther, builder.filename.c_str());
 #endif
-                }
               }
             }
-            maxNumSide = std::max(maxNumSide, num);
-#if defined(_DEBUG)
-            if(maxNumSide > 2)
-              printf("nonmanifold high edge side: t %d - %d - %s\n", t, maxNumSide, builder.filename.c_str());
-#endif
           }
+
+#if defined(_DEBUG)
+          if(num > 3)
+            printf("nonmanifold high edge side: t %d - %d - %s\n", t, num, builder.filename.c_str());
+#endif
         }
       }
       nonManifold = nonManifold || (nonManifoldEdge != Mesh::INVALID);
@@ -2397,18 +2400,10 @@ public:
       else if(edge.isNonManifold()) {
         LdrMaterialID refMaterial = part.materials[edge.triLeft];
         // compare all triangles against reference material
-        uint32_t nextNM = edge.nmRight;
+        uint32_t nextNM = edge.nmList;
         while(nextNM != Mesh::INVALID) {
-          uint32_t tri = mesh.iterateEdgeNM(nextNM);
-          if(refMaterial != part.materials[tri]) {
-            edge.flag |= EDGE_MATERIAL_BIT;
-            break;
-          }
-        }
-        nextNM = edge.nmLeft;
-        while(nextNM != Mesh::INVALID) {
-          uint32_t tri = mesh.iterateEdgeNM(nextNM);
-          if(refMaterial != part.materials[tri]) {
+          const MeshFull::EdgeNM* edgeNM = mesh.iterateEdgeNM(nextNM);
+          if(refMaterial != part.materials[edgeNM->tri]) {
             edge.flag |= EDGE_MATERIAL_BIT;
             break;
           }
