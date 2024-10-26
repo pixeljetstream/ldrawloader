@@ -456,26 +456,12 @@ private:
     TVector<uint32_t>      lines;
     TVector<uint32_t>      optional_lines;
     TVector<uint32_t>      triangles;
-    TVector<uint32_t>      connections;
     TVector<uint32_t>      quads;
     TVector<LdrMaterialID> materials;
     TVector<LdrShape>      shapes;
     TVector<LdrInstance>   instances;
 
     Loader* loader = nullptr; // mostly for debugging
-
-    inline uint32_t addConnection(uint32_t v)
-    {
-      if(connections[v] == LDR_INVALID_IDX) {
-        connections[v] = (uint32_t)positions.size();
-        LdrVector tmp  = positions[v];
-        positions.push_back(tmp);
-        connections.push_back(v);
-      }
-      return connections[v];
-    }
-
-    inline bool hasConnection(uint32_t v) const { return connections[v] != LDR_INVALID_IDX; }
 
     inline bool isQuad(uint32_t t) const { return quads[t] != LDR_INVALID_IDX; }
   };

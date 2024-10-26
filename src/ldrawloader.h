@@ -302,7 +302,6 @@ typedef struct LdrPart
   LdrVertexIndex* LDR_RESTRICT lines;
   LdrVertexIndex* LDR_RESTRICT optional_lines;
   LdrVertexIndex* LDR_RESTRICT triangles;
-  LdrVertexIndex* LDR_RESTRICT connections;  // per-vertex, if != ~0 means index of opposing non-manifold vertex split
   LdrMaterialID* LDR_RESTRICT  materials;
   uint32_t* LDR_RESTRICT       quads;  // per-traingle, if != ~0 means index of starting triangle
   LdrShape* LDR_RESTRICT       shapes;
