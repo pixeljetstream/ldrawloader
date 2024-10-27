@@ -91,8 +91,8 @@ extern "C" {
 #define LDR_LOADER_VERSION_MINOR 3
 #define LDR_LOADER_VERSION_CACHE 0
 
-#define LDR_INVALID_ID (~0)
-#define LDR_INVALID_IDX (~0)
+#define LDR_INVALID_ID uint32_t(~0)
+#define LDR_INVALID_IDX uint32_t(~0)
 #define LDR_INVALID_SHAPETYPE 0
 
 #define LDR_RESTRICT __restrict

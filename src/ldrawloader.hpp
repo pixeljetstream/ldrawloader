@@ -46,7 +46,7 @@ struct Loader
 {
   friend class MeshUtils;
 
-  template <class TvtxIndex_t, class TvtxIndexPair, int VTX_BITS, int VTX_TRIS>
+  template <bool VTX_TRIS>
   friend class TMesh;
 
   friend class Utils;
@@ -461,7 +461,7 @@ private:
     TVector<LdrShape>      shapes;
     TVector<LdrInstance>   instances;
 
-    Loader* loader = nullptr; // mostly for debugging
+    Loader* loader = nullptr;  // mostly for debugging
 
     inline bool isQuad(uint32_t t) const { return quads[t] != LDR_INVALID_IDX; }
   };
@@ -502,7 +502,7 @@ private:
 
     TVector<EdgePair> vtxOutEdgePairs;
 
-    Loader* loader = nullptr; // mostly for debugging
+    Loader* loader = nullptr;  // mostly for debugging
   };
 
   struct BuilderRenderInstance
