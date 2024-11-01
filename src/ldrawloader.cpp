@@ -32,7 +32,7 @@
 
 #define LDR_DEBUG_FLAG_FILELOAD 1
 #define LDR_DEBUG_FLAG 0
-#define LDR_DEBUG_PRINT_NON_MANIFOLDS 1
+#define LDR_DEBUG_PRINT_NON_MANIFOLDS 0
 
 namespace ldr {
 
@@ -1155,12 +1155,11 @@ public:
     builder.materials.resize(write);
   }
 
-  static void storeLines(Mesh& mesh, Loader::BuilderPart& builder, bool optional)
+  static void storeEdgeLines(Mesh& mesh, Loader::BuilderPart& builder, bool optional)
   {
     Loader::TVector<LdrVertexIndex>& lines = optional ? builder.optional_lines : builder.lines;
     uint32_t                         flag  = optional ? EDGE_OPTIONAL_BIT : EDGE_HARD_BIT;
 
-    lines.clear();
     for(uint32_t e = 0; e < mesh.numEdges; e++) {
       const Mesh::Edge& edge = mesh.edges[e];
       if(!edge.isDead() && edge.flag & flag) {
@@ -1169,7 +1168,7 @@ public:
       }
     }
   }
-  static void initEdgeLines(Mesh& mesh, Loader::BuilderPart& builder, bool optional)
+  static void initLines(Mesh& mesh, Loader::BuilderPart& builder, bool optional)
   {
     Loader::TVector<uint32_t> path;
     path.reserve(16);
@@ -1183,30 +1182,11 @@ public:
 
     uint32_t numOrigLines = lines.size() / 2;
 
+    Loader::TVector<LdrVertexIndex> newLines;
+
     for(uint32_t i = 0; i < lines.size() / 2; i++) {
       uint32_t lineA = lines[i * 2 + 0];
       uint32_t lineB = lines[i * 2 + 1];
-
-#if 0
-      uint32_t otherA = builder.connections[lineA];
-      uint32_t otherB = builder.connections[lineB];
-
-      // both vertices were duplicated, then also duplicate this line once
-      if(i < numOrigLines && (otherA != LDR_INVALID_IDX || otherB != LDR_INVALID_IDX)) {
-        if(otherA != LDR_INVALID_IDX && otherB != LDR_INVALID_IDX) {
-          lines.push_back(otherA);
-          lines.push_back(otherB);
-        }
-        else if(otherA != LDR_INVALID_IDX) {
-          lines.push_back(otherA);
-          lines.push_back(lineB);
-        }
-        else if(otherB != LDR_INVALID_IDX) {
-          lines.push_back(lineA);
-          lines.push_back(otherB);
-        }
-      }
-#endif
 
       Mesh::Edge* edgeFound = mesh.getEdge(lineA, lineB);
       if(edgeFound) {
@@ -1215,6 +1195,8 @@ public:
       else {
         // floating edges (no triangles) are ugly, try to find path between them
         // once from both directions in case there is t-junction
+
+        uint32_t foundConnections = 0;
 
         for(int side = 0; side < 2; side++) {
           uint32_t vStart = side ? lineA : lineB;
@@ -1268,11 +1250,17 @@ public:
             for(uint32_t p = 0; p < numPath; p++) {
               mesh.edges[path[p]].flag |= flag;
             }
+            foundConnections++;
           }
+        }
+
+        if(foundConnections != 2) {
+          newLines.push_back(lineA);
+          newLines.push_back(lineB);
         }
       }
     }
-    lines.clear();
+    lines.move(newLines);
   }
 
 
@@ -1501,13 +1489,13 @@ public:
 
     MeshUtils::initMesh(mesh, builder);
 
-    MeshUtils::initEdgeLines(mesh, builder, false);
-    MeshUtils::initEdgeLines(mesh, builder, true);
+    MeshUtils::initLines(mesh, builder, false);
+    MeshUtils::initLines(mesh, builder, true);
     if(config.partFixTjunctions) {
       MeshUtils::fixTjunctions(mesh, builder);
     }
-    MeshUtils::storeLines(mesh, builder, false);
-    MeshUtils::storeLines(mesh, builder, true);
+    MeshUtils::storeEdgeLines(mesh, builder, false);
+    MeshUtils::storeEdgeLines(mesh, builder, true);
     MeshUtils::removeDeleted(mesh, builder);
   }
 
@@ -1780,6 +1768,15 @@ public:
     return vertex;
   }
 
+  static LdrRenderVertex make_vertex(const LdrVector& pos)
+  {
+    LdrRenderVertex vertex;
+    vertex.position = pos;
+    vertex.normal   = vec_normalize(pos);
+
+    return vertex;
+  }
+
   static void builderRenderPartBasic(Loader::BuilderRenderPart& builder, MeshFull& mesh, const LdrPart& part, const Loader::Config& config)
   {
     // start with unique vertices per triangle
@@ -1954,8 +1951,26 @@ public:
     builder.vertices.resize(numVerticesNew);
 
     for(uint32_t i = 0; i < part.num_lines; i++) {
-      builder.lines.push_back(firstRenderVertex[part.lines[i * 2 + 0]]);
-      builder.lines.push_back(firstRenderVertex[part.lines[i * 2 + 1]]);
+      uint32_t vertexA = part.lines[i * 2 + 0];
+      uint32_t vertexB = part.lines[i * 2 + 1];
+
+      uint32_t renderVertexA = firstRenderVertex[vertexA];
+
+      if (renderVertexA == LDR_INVALID_IDX) {
+        renderVertexA = builder.vertices.size();
+        firstRenderVertex[vertexA] = renderVertexA;
+        builder.vertices.push_back(make_vertex(part.positions[vertexA]));
+      }
+      
+      uint32_t renderVertexB = firstRenderVertex[vertexB];
+      if(renderVertexB == LDR_INVALID_IDX) {
+        renderVertexB = builder.vertices.size();
+        firstRenderVertex[vertexB] = renderVertexB;
+        builder.vertices.push_back(make_vertex(part.positions[vertexB]));
+      }
+      
+      builder.lines.push_back(renderVertexA);
+      builder.lines.push_back(renderVertexB);
     }
   }
 

@@ -223,16 +223,6 @@ private:
     uint32_t m_capacity = 0;
     uint32_t m_size     = 0;
 
-    void copy(const TVector<T>& other)
-    {
-      if(!other.m_size)
-        return;
-
-      reserve(other.m_size);
-      memcpy(m_data, other.m_data, sizeof(T) * other.m_size);
-      m_size = other.m_size;
-    }
-
   public:
     TVector() {}
     TVector(uint32_t num, T ref = T()) { resize(num, ref); }
@@ -310,6 +300,24 @@ private:
     {
       assert(m_size);
       return m_data[m_size - 1];
+    }
+
+    void copy(const TVector<T>& other)
+    {
+      if(!other.m_size)
+        return;
+
+      reserve(other.m_size);
+      memcpy(m_data, other.m_data, sizeof(T) * other.m_size);
+      m_size = other.m_size;
+    }
+
+    void move(TVector<T>& other)
+    {
+      reset();
+      std::swap(m_size, other.m_size);
+      std::swap(m_data, other.m_data);
+      std::swap(m_capacity, other.m_capacity);
     }
   };
 #endif
@@ -477,7 +485,7 @@ private:
 
   struct BuilderRenderPart
   {
-    const char* filename;
+    const char* filename = nullptr;
 
     struct EdgePair
     {
@@ -487,8 +495,8 @@ private:
       uint32_t triB;
     };
 
-    LdrPartFlag flag;
-    LdrBbox     bbox;
+    LdrPartFlag flag = {};
+    LdrBbox     bbox = {{FLT_MAX, FLT_MAX, FLT_MAX}, {-FLT_MAX, -FLT_MAX, -FLT_MAX}};
 
     TVector<LdrRenderVertex> vertices;
     TVector<uint32_t>        lines;
@@ -512,7 +520,7 @@ private:
 
   struct BuilderRenderModel
   {
-    LdrBbox bbox;
+    LdrBbox bbox = {{FLT_MAX, FLT_MAX, FLT_MAX}, {-FLT_MAX, -FLT_MAX, -FLT_MAX}};
     // builder instance is not POD hence don't use TVector
     std::vector<BuilderRenderInstance> instances;
   };
