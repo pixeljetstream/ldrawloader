@@ -171,7 +171,10 @@ inline LdrVector vec_normalize_length(const LdrVector a, float& length)
   length    = len;
   return vec_mul(a, (1.0f / len));
 }
-
+inline LdrVector vec_neg(const LdrVector a)
+{
+  return {-a.x, -a.y, -a.z};
+}
 inline void bbox_merge(LdrBbox& bbox, const LdrVector vec)
 {
   bbox.min = vec_min(bbox.min, vec);
@@ -202,20 +205,20 @@ const float Loader::CHAMFER_PARALLEL_DOT  = 0.999f;
 const float Loader::ANGLE_45_DOT          = 0.7071f;
 const float Loader::MIN_MERGE_EPSILON     = 0.015f;  // 1 LDU ~ 0.4mm
 
+static_assert(LDR_INVALID_ID == LDR_INVALID_IDX);
 
 template <bool VTX_TRIS>
 class TMesh
 {
 public:
-  typedef uint32_t vtxIndex_t;
+  static const uint32_t VTX_BITS = 31;
+  static const uint32_t INVALID  = uint32_t(~0);
 
-  static const uint32_t   VTX_BITS    = 31;
-  static const vtxIndex_t INVALID_VTX = vtxIndex_t(~0);
-  static const uint32_t   INVALID     = uint32_t(~0);
+  static_assert(INVALID == LDR_INVALID_IDX);
 
   typedef uint64_t vtxPair_t;
 
-  static vtxPair_t make_vtxPair(vtxIndex_t vtxA, vtxIndex_t vtxB)
+  static vtxPair_t make_vtxPair(uint32_t vtxA, uint32_t vtxB)
   {
     if(vtxA < vtxB) {
       return vtxPair_t(vtxA) | (vtxPair_t(vtxB) << VTX_BITS);
@@ -288,6 +291,12 @@ public:
     }
   };
 
+  struct TriAdjacency
+  {
+    // other triangle per edge
+    uint32_t edgeTri[3] = {INVALID, INVALID, INVALID};
+  };
+
   // additional left/right for non-manifold overflow
   // linked list
   struct EdgeNM
@@ -303,13 +312,13 @@ public:
     // left triangle has its edge running from A to B
     // right triangle in opposite direction.
 
-    vtxIndex_t vtxA;
-    vtxIndex_t vtxB;
-    uint32_t   triLeft;
-    uint32_t   triRight;
-    float      angleRight;
-    uint32_t   flag;
-    uint32_t   nmList;
+    uint32_t vtxA;
+    uint32_t vtxB;
+    uint32_t triLeft;
+    uint32_t triRight;
+    float    angleRight;
+    uint32_t flag;
+    uint32_t nmList;
 
     bool isNonManifold() const
     {
@@ -324,13 +333,13 @@ public:
 
     bool hasFace(uint32_t idx) const { return triLeft == idx || triRight == idx; }
 
-    vtxIndex_t otherVertex(vtxIndex_t idx) const { return idx != vtxA ? vtxA : vtxB; }
+    uint32_t otherVertex(uint32_t idx) const { return idx != vtxA ? vtxA : vtxB; }
 
     uint32_t otherTri(uint32_t idx) const { return idx != triLeft ? triLeft : triRight; }
 
     uint32_t getTri(uint32_t right) const { return right ? triRight : triLeft; }
 
-    vtxIndex_t getVertex(uint32_t b) const { return b ? vtxB : vtxA; }
+    uint32_t getVertex(uint32_t b) const { return b ? vtxB : vtxA; }
 
     vtxPair_t getPair() const { return make_vtxPair(vtxA, vtxB); }
   };
@@ -344,12 +353,14 @@ public:
   bool     nonManifoldVertices      = false;
   bool     nonManifoldNeedsOrdering = false;
 
-  vtxIndex_t* triangles = nullptr;
+  uint32_t* triangles = nullptr;
 
   Connectivity vtxTriangles;
   Connectivity vtxEdges;
 
-  Loader::BitArray        triAlive;
+  Loader::TVector<TriAdjacency> triAdjacencies;
+  Loader::BitArray              triAlive;
+
   Loader::TVector<Edge>   edges;
   Loader::TVector<EdgeNM> edgesNM;
 
@@ -376,7 +387,7 @@ public:
     return false;
   }
 
-  inline bool getVertexClosable(vtxIndex_t vertex)
+  inline bool getVertexClosable(uint32_t vertex)
   {
     uint32_t        open = 0;
     uint32_t        count;
@@ -387,7 +398,7 @@ public:
     return open == 2;
   }
 
-  inline Edge* getEdge(vtxIndex_t vtxA, vtxIndex_t vtxB)
+  inline Edge* getEdge(uint32_t vtxA, uint32_t vtxB)
   {
     const auto it = lookupEdge.find(make_vtxPair(vtxA, vtxB));
     if(it != lookupEdge.cend()) {
@@ -396,7 +407,16 @@ public:
     return nullptr;
   }
 
-  inline uint32_t getEdgeIdx(vtxIndex_t vtxA, vtxIndex_t vtxB)
+  inline const Edge* getEdge(uint32_t vtxA, uint32_t vtxB) const
+  {
+    const auto it = lookupEdge.find(make_vtxPair(vtxA, vtxB));
+    if(it != lookupEdge.cend()) {
+      return &edges[it->second];
+    }
+    return nullptr;
+  }
+
+  inline uint32_t getEdgeIdx(uint32_t vtxA, uint32_t vtxB) const
   {
     const auto it = lookupEdge.find(make_vtxPair(vtxA, vtxB));
     if(it != lookupEdge.cend()) {
@@ -405,20 +425,35 @@ public:
     return INVALID;
   }
 
-  inline vtxIndex_t* getTriangle(uint32_t t) { return &triangles[t * 3]; }
+  inline uint32_t* getTriangle(uint32_t t) { return &triangles[t * 3]; }
 
-  inline const vtxIndex_t* getTriangle(uint32_t t) const { return &triangles[t * 3]; }
+  inline const uint32_t* getTriangle(uint32_t t) const { return &triangles[t * 3]; }
 
-  static inline uint32_t findLowest(const vtxIndex_t* indices)
+  inline void setTriAdjacency(uint32_t t, uint32_t e, uint32_t tOther)
   {
-    vtxIndex_t lowestIdx = INVALID_VTX;
-    uint32_t   lowest    = 0;
-    for(uint32_t i = 0; i < 3; i++) {
-      uint32_t idx = indices[i];
-      if(idx < lowestIdx) {
-        lowestIdx = idx;
-        lowest    = i;
-      }
+    assert(t != tOther);
+    assert(triAdjacencies[t].edgeTri[e] == INVALID || triAdjacencies[t].edgeTri[e] == tOther);
+    triAdjacencies[t].edgeTri[e] = tOther;
+  }
+
+  bool areTriAdjacent(uint32_t ta, uint32_t tb) const
+  {
+    const TriAdjacency triA = triAdjacencies[ta];
+
+    return (triA.edgeTri[0] == tb || triA.edgeTri[1] == tb || triA.edgeTri[2] == tb);
+  }
+
+  static inline uint32_t findLowest(const uint32_t* indices)
+  {
+    uint32_t lowestIdx = indices[0];
+    uint32_t lowest    = 0;
+    if(indices[1] < lowestIdx) {
+      lowestIdx = indices[1];
+      lowest    = 1;
+    }
+    if(indices[2] < lowestIdx) {
+      lowestIdx = indices[2];
+      lowest    = 2;
     }
 
     return lowest;
@@ -426,8 +461,8 @@ public:
 
   inline bool areTrianglesSame(uint32_t t1, uint32_t t2) const
   {
-    const vtxIndex_t* indices1 = &triangles[t1 * 3];
-    const vtxIndex_t* indices2 = &triangles[t2 * 3];
+    const uint32_t* indices1 = &triangles[t1 * 3];
+    const uint32_t* indices2 = &triangles[t2 * 3];
 
     uint32_t lowest1 = findLowest(indices1);
     uint32_t lowest2 = findLowest(indices2);
@@ -446,7 +481,23 @@ public:
     uint32_t idxB = triangles[t * 3 + 1];
     uint32_t idxC = triangles[t * 3 + 2];
 
-    return vec_normalize(vec_cross(vec_sub(positions[idxB], positions[idxA]), vec_sub(positions[idxC], positions[idxA])));
+    LdrVector sides[3];
+    float     minAngle = FLT_MAX;
+    uint32_t  corner   = 0;
+
+    for(uint32_t i = 0; i < 3; i++) {
+      sides[i] = vec_normalize(vec_sub(positions[triangles[t * 3 + i]], positions[triangles[t * 3 + (i + 1) % 3]]));
+    }
+    for(uint32_t i = 0; i < 3; i++) {
+      float angle = fabsf(vec_dot(vec_neg(sides[i]), sides[(i + 1) % 3]));
+      if(angle < minAngle) {
+        minAngle = angle;
+        corner   = i;
+      }
+    }
+
+    return vec_normalize(vec_cross((sides[corner]), (sides[(corner + 1) % 3])));
+    //return vec_normalize(vec_cross(sides[0], vec_neg(sides[2])));
   }
 
   // accounts for non-manifold edges
@@ -460,7 +511,7 @@ public:
     }
   }
 
-  inline const vtxIndex_t getTriangleOtherVertex(uint32_t t, const Edge& edge) const
+  inline const uint32_t getTriangleOtherVertex(uint32_t t, const Edge& edge) const
   {
     uint32_t idxA = triangles[t * 3 + 0];
     uint32_t idxB = triangles[t * 3 + 1];
@@ -473,12 +524,12 @@ public:
     if(idxC != edge.vtxA && idxC != edge.vtxB)
       return idxC;
 
-    return INVALID_VTX;
+    return INVALID;
   }
 
-  inline uint32_t findTriangleVertex(uint32_t t, vtxIndex_t vtx) const
+  inline uint32_t findTriangleVertex(uint32_t t, uint32_t vtx) const
   {
-    const vtxIndex_t* indices = getTriangle(t);
+    const uint32_t* indices = getTriangle(t);
     if(indices[0] == vtx)
       return 0;
     if(indices[1] == vtx)
@@ -488,9 +539,9 @@ public:
     return INVALID;
   }
 
-  inline void replaceTriangleVertex(uint32_t t, vtxIndex_t vtx, vtxIndex_t newVtx)
+  inline void replaceTriangleVertex(uint32_t t, uint32_t vtx, uint32_t newVtx)
   {
-    vtxIndex_t* indices = getTriangle(t);
+    uint32_t* indices = getTriangle(t);
     if(indices[0] == vtx)
       indices[0] = newVtx;
     if(indices[1] == vtx)
@@ -505,52 +556,6 @@ public:
     uint32_t vtxB = findTriangleVertex(t, edge.vtxB);
 
     return ((vtxA + 1) % 3 == vtxB);
-  }
-
-  // returns sub index within vertex edge list
-  inline uint32_t getNextVertexSubEdge(vtxIndex_t vertex, uint32_t subIndex, uint32_t triIndex, uint32_t triIndexNot) const
-  {
-    if(triIndex == INVALID)
-      return subIndex;
-
-    uint32_t        count;
-    const uint32_t* curEdges = vtxEdges.getConnected(vertex, count);
-    for(uint32_t i = 0; i < count; i++) {
-      uint32_t    edgeIndex = curEdges[i];
-      const Edge& edge      = edges[edgeIndex];
-
-      if(i == subIndex || edge.isDead()) {
-        continue;
-      }
-
-      if(edge.hasFace(triIndex) && (edge.isOpen() || edge.otherTri(triIndex) != triIndexNot)) {
-        return i;
-      }
-    }
-    return subIndex;
-  }
-
-  // returns edge index
-  inline uint32_t getNextVertexEdge(vtxIndex_t vertex, uint32_t edgePrevIndex, uint32_t triIndex, uint32_t triIndexNot) const
-  {
-    if(triIndex == INVALID)
-      return edgePrevIndex;
-
-    uint32_t        count;
-    const uint32_t* curEdges = vtxEdges.getConnected(vertex, count);
-    for(uint32_t i = 0; i < count; i++) {
-      uint32_t    edgeIndex = curEdges[i];
-      const Edge& edge      = edges[edgeIndex];
-
-      if(edgeIndex == edgePrevIndex || edge.isDead()) {
-        continue;
-      }
-
-      if(edge.hasFace(triIndex) && (edge.isOpen() || edge.otherTri(triIndex) != triIndexNot)) {
-        return edgeIndex;
-      }
-    }
-    return edgePrevIndex;
   }
 
   uint32_t addEdgeNM(uint32_t startNM, uint32_t tri, bool isLeft)
@@ -661,10 +666,11 @@ public:
     return count;
   }
 
-  uint32_t addEdge(vtxIndex_t vtxA, vtxIndex_t vtxB, uint32_t tri, uint32_t& nonManifold)
+  uint32_t addEdge(uint32_t vtxA, uint32_t vtxB, uint32_t tri, uint32_t& nonManifold)
   {
     vtxPair_t pair = make_vtxPair(vtxA, vtxB);
     auto      it   = lookupEdge.find(pair);
+
     if(it != lookupEdge.end()) {
       Edge& edge = edges[it->second];
 
@@ -708,7 +714,7 @@ public:
     }
   }
 
-  inline void removeEdge(vtxIndex_t vtxA, vtxIndex_t vtxB, uint32_t tri)
+  inline void removeEdge(uint32_t vtxA, uint32_t vtxB, uint32_t tri)
   {
     vtxPair_t pair = make_vtxPair(vtxA, vtxB);
     auto      it   = lookupEdge.find(pair);
@@ -782,7 +788,7 @@ public:
     }
   }
 
-  inline uint32_t isEdgeClosed(vtxIndex_t vtxA, vtxIndex_t vtxB) const
+  inline uint32_t isEdgeClosed(uint32_t vtxA, uint32_t vtxB) const
   {
     vtxPair_t pair = make_vtxPair(vtxA, vtxB);
     auto      it   = lookupEdge.find(pair);
@@ -929,7 +935,7 @@ public:
     }
   }
 
-  void initBasics(uint32_t numV, uint32_t numT, vtxIndex_t* tris, Loader* _loader)
+  void initBasics(uint32_t numV, uint32_t numT, uint32_t* tris, Loader* _loader)
   {
     loader              = _loader;
     vtxEdges.loader     = _loader;
@@ -943,11 +949,12 @@ public:
     edges.reserve(numT * 3);
     lookupEdge.reserve(numT * 3);
     triAlive.resize(numT, false);
+    triAdjacencies.resize(numT, TriAdjacency());
 
     resizeVertices(numV);
   }
 
-  bool initFull(uint32_t numV, uint32_t numT, vtxIndex_t* tris, const LdrVector* positions, Loader* _loader)
+  bool initFull(uint32_t numV, uint32_t numT, uint32_t* tris, const LdrVector* positions, Loader* _loader)
   {
     bool nonManifold = false;
     initBasics(numV, numT, tris, _loader);
@@ -959,6 +966,7 @@ public:
     if(nonManifold) {
       orderNonManifoldByAngle(positions);
     }
+
 
     return nonManifold;
   }
@@ -975,9 +983,9 @@ public:
 
   struct SortedEdge
   {
-    float angle;
-    float tri;
-    bool  isLeft;
+    float    angle;
+    uint32_t tri;
+    bool     isLeft;
 
     static bool comparator(const SortedEdge& a, const SortedEdge& b) { return a.angle < b.angle; }
   };
@@ -1022,7 +1030,7 @@ public:
         SortedEdge    sedge;
         sedge.angle  = getEdgeAngle(posA, vecX0, vecX1, positions, edgeNM.tri, edge);
         sedge.isLeft = edgeNM.isLeft;
-        sedge.tri    = edge.triRight;
+        sedge.tri    = edgeNM.tri;
         sortedEdges.push_back(sedge);
         nextNM = edgeNM.nextNM;
       }
@@ -1051,6 +1059,40 @@ public:
 
     nonManifoldNeedsOrdering = false;
   }
+
+  bool iterateTrianglePairs(const Edge& edge, uint32_t& nmList, uint32_t& triLeft, uint32_t& triRight) const
+  {
+    if(triLeft == INVALID) {
+      triLeft  = edge.triLeft;
+      triRight = edge.triRight;
+      nmList   = edge.nmList;
+    }
+    else {
+      triLeft  = INVALID;
+      triRight = INVALID;
+
+      if(edge.isNonManifold()) {
+        // find next pairing
+        while(nmList != INVALID) {
+          const EdgeNM* edgeNM = iterateEdgeNM(nmList);
+          if(edgeNM->isLeft) {
+            triLeft  = edgeNM->tri;
+            triRight = INVALID;
+          }
+          else {
+            triRight = edgeNM->tri;
+          }
+
+          assert(triLeft != triRight);
+
+          if(triLeft != INVALID && triRight != INVALID)
+            break;
+        }
+      }
+    }
+
+    return triLeft != INVALID && triRight != INVALID;
+  }
 };
 
 typedef TMesh<0> Mesh;
@@ -1062,7 +1104,8 @@ static const uint32_t EDGE_HARD_BIT         = 1 << 0;
 static const uint32_t EDGE_OPTIONAL_BIT     = 1 << 1;
 static const uint32_t EDGE_HARD_FLOATER_BIT = 1 << 2;
 static const uint32_t EDGE_MATERIAL_BIT     = 1 << 3;
-static const uint32_t EDGE_NONMANIFOLD      = 1 << 4;
+static const uint32_t EDGE_ANGLEHARD_BIT    = 1 << 4;
+static const uint32_t EDGE_NONMANIFOLD      = 1 << 5;
 
 // separate class due to potential template usage for Mesh
 class MeshUtils
@@ -1229,10 +1272,10 @@ public:
               for(uint32_t e = 0; e < edgeCount; e++) {
                 const Mesh::Edge& edge = mesh.edges[edgeIndices[e]];
                 assert(!edge.isDead());
-                Mesh::vtxIndex_t vOther = edge.otherVertex(vtest);
-                LdrVector        vecCur = vec_normalize(vec_sub(builder.positions[vOther], builder.positions[vtest]));
-                float            dist   = vec_sq_length(vec_sub(builder.positions[vOther], builder.positions[vEnd]));
-                float            dot    = vec_dot(vecCur, vecEdge);
+                uint32_t  vOther = edge.otherVertex(vtest);
+                LdrVector vecCur = vec_normalize(vec_sub(builder.positions[vOther], builder.positions[vtest]));
+                float     dist   = vec_sq_length(vec_sub(builder.positions[vOther], builder.positions[vEnd]));
+                float     dot    = vec_dot(vecCur, vecEdge);
                 if(dot > maxDot && dist < minDist) {
                   maxDot      = dot;
                   vNext       = vOther;
@@ -1269,7 +1312,7 @@ public:
     bool modified = false;
 
     // removes t-junctions and closable gaps
-    builder.flag.canChamfer = 1;
+    //builder.flag.canChamfer = 1;
 
     uint32_t numVertices = (uint32_t)builder.positions.size();
 
@@ -1296,8 +1339,8 @@ public:
 
         uint32_t triOld = edgeA.triLeft;
 
-        LdrVector        posA = builder.positions[v];
-        Mesh::vtxIndex_t vEnd = edgeA.otherVertex(v);
+        LdrVector posA = builder.positions[v];
+        uint32_t  vEnd = edgeA.otherVertex(v);
 
         float     lengthA;
         LdrVector vecA = vec_normalize_length(vec_sub(builder.positions[vEnd], posA), lengthA);
@@ -1305,10 +1348,10 @@ public:
         std::vector<uint32_t> path;
         path.reserve(128);
 
-        Mesh::vtxIndex_t vNext          = v;
-        uint32_t         edgeIdxSkip    = edgeIdxA;
-        uint32_t         edgeNext       = 0;
-        bool             singleTriangle = true;
+        uint32_t vNext          = v;
+        uint32_t edgeIdxSkip    = edgeIdxA;
+        uint32_t edgeNext       = 0;
+        bool     singleTriangle = true;
 
         // find closest edges
         while(edgeNext != Mesh::INVALID) {
@@ -1324,7 +1367,7 @@ public:
             if(edgeIdxC == edgeIdxSkip || edgeC.isDead() || !edgeC.isOpen() || processed.getBit(edgeIdxC))
               continue;
 
-            Mesh::vtxIndex_t vC = edgeC.otherVertex(vNext);
+            uint32_t vC = edgeC.otherVertex(vNext);
 
             float     lengthC;
             LdrVector vecC  = vec_normalize_length(vec_sub(builder.positions[vC], posA), lengthC);
@@ -1376,7 +1419,7 @@ public:
 
         processed.setBit(edgeIdxA, true);
 
-        Mesh::vtxIndex_t triIndices[3];
+        uint32_t triIndices[3];
         triIndices[0] = builder.triangles[triOld * 3 + 0];
         triIndices[1] = builder.triangles[triOld * 3 + 1];
         triIndices[2] = builder.triangles[triOld * 3 + 2];
@@ -1424,8 +1467,8 @@ public:
         //    |\\ |
         //    x_x_x
 
-        uint32_t         flagPath = edgeA.flag;
-        Mesh::vtxIndex_t vFirst   = edgeA.vtxA;
+        uint32_t flagPath = edgeA.flag;
+        uint32_t vFirst   = edgeA.vtxA;
 
         for(size_t i = 0; i < path.size(); i++) {
           uint32_t    edgeIdxC = path[i];
@@ -1457,7 +1500,7 @@ public:
 
           uint32_t nonManifold = mesh.addTriangle(triIdx);
           if(nonManifold != Mesh::INVALID) {
-            builder.flag.canChamfer = 0;
+            //builder.flag.canChamfer = 0;
           }
 
           vFirst = edgeC.otherVertex(vFirst);
@@ -1486,6 +1529,8 @@ public:
   {
     Mesh mesh;
     mesh.initBasics(builder.positions.size(), builder.triangles.size() / 3, builder.triangles.data(), builder.loader);
+
+    builder.flag.canChamfer = 1;
 
     MeshUtils::initMesh(mesh, builder);
 
@@ -1522,7 +1567,8 @@ public:
     Loader::TVector<uint32_t> vtxChamferBegin(part.num_positions, 0);
 
     for(uint32_t v = 0; v < part.num_positions; v++) {
-      uint32_t outCount = builder.vtxOutCount[v];
+      Loader::BuilderRenderPart::VertexInfo outInfo  = builder.vtxOutInfo[v];
+      uint32_t                              outCount = outInfo.count;
       if(outCount > 1) {
         vtxChamferBegin[v] = (uint32_t)builder.vertices.size();
 
@@ -1545,15 +1591,15 @@ public:
 
         // create new output vertex that is chamfered
         for(uint32_t o = 0; o < outCount; o++) {
-          uint32_t outIdx = builder.vtxOutBegin[v] + o;
+          uint32_t outIdx = builder.vtxOutIndices[outInfo.begin + o];
 
           LdrVector normal = builder.vertices[outIdx].normal;
 
-          const Loader::BuilderRenderPart::EdgePair& edgePair = builder.vtxOutEdgePairs[outIdx];
+          const Loader::BuilderRenderPart::EdgePair& edgePair = builder.vtxOutEdgePairs[outInfo.begin + o];
           // get the two edges that define the triangle cluster for this output vertex
-          const MeshFull::Edge& edgeA = mesh.edges[edgePair.edgeA];
-          const MeshFull::Edge& edgeB = mesh.edges[edgePair.edgeB];
-          uint32_t              tri   = edgePair.triA;
+          const MeshFull::Edge& edgeA = mesh.edges[edgePair.edge[0]];
+          const MeshFull::Edge& edgeB = mesh.edges[edgePair.edge[1]];
+          uint32_t              tri   = edgePair.tri[0];
           materialTri                 = tri;
 
 
@@ -1587,7 +1633,7 @@ public:
           LdrVector vecBA = vec_sub(part.positions[edgeB.otherVertex(v)], part.positions[v]);
 
           // may need to reverse vectors to makes sure edge BC is "against" triangle winding.
-          if(!((edgeA.vtxB == v && edgeA.triLeft == edgePair.triA) || (edgeA.vtxA == v && edgeA.triRight == edgePair.triA))) {
+          if(!((edgeA.vtxB == v && edgeA.triLeft == edgePair.tri[0]) || (edgeA.vtxA == v && edgeA.triRight == edgePair.tri[0]))) {
             LdrVector temp = vecBC;
             vecBC          = vecBA;
             vecBA          = temp;
@@ -1633,9 +1679,9 @@ public:
           LdrVector vecDelta = vec_mul(shift, (chamferDistance * chamferModifier));
 
           if(edgeA.isOpen() || edgeB.isOpen()) {
-            MeshFull::vtxIndex_t vOther  = edgeA.isOpen() ? edgeA.otherVertex(v) : edgeB.otherVertex(v);
-            LdrVector            vecOpen = vec_normalize(vec_sub(part.positions[vOther], part.positions[v]));
-            vecDelta                     = vec_mul(vecOpen, vec_dot(vecOpen, vecDelta));
+            uint32_t  vOther  = edgeA.isOpen() ? edgeA.otherVertex(v) : edgeB.otherVertex(v);
+            LdrVector vecOpen = vec_normalize(vec_sub(part.positions[vOther], part.positions[v]));
+            vecDelta          = vec_mul(vecOpen, vec_dot(vecOpen, vecDelta));
           }
 
           uint32_t        newIdx    = (uint32_t)builder.vertices.size();
@@ -1709,52 +1755,67 @@ public:
     for(uint32_t e = 0; e < mesh.numEdges; e++) {
       const MeshFull::Edge& edge = mesh.edges[e];
 
-      if(!(edge.flag & EDGE_HARD_BIT) || edge.isOpen())
+      if(edge.isOpen() || !(edge.flag & (EDGE_ANGLEHARD_BIT | EDGE_HARD_BIT)))
         continue;
 
-      // find the right out vertex for this edge
-      auto findChamferVertex = [&](uint32_t v, uint32_t tri) {
-        uint32_t outCount = builder.vtxOutCount[v];
-        for(uint32_t o = 0; o < outCount; o++) {
-          uint32_t                                   outIdx   = builder.vtxOutBegin[v] + o;
-          const Loader::BuilderRenderPart::EdgePair& edgePair = builder.vtxOutEdgePairs[outIdx];
-          if(edgePair.edgeA == e && edgePair.triA == tri) {
-            return vtxChamferBegin[v] + o;
-          }
-          if(edgePair.edgeB == e && edgePair.triB == tri) {
-            return vtxChamferBegin[v] + o;
-          }
-        }
-        assert(outCount == 1);
-        return builder.vtxOutBegin[v];
-      };
+      uint32_t triLeft  = MeshFull::INVALID;
+      uint32_t triRight = MeshFull::INVALID;
+      uint32_t nmList   = MeshFull::INVALID;
 
-      // find the two vertices for left side
-      uint32_t idxLeftA = findChamferVertex(edge.vtxA, edge.triLeft);
-      uint32_t idxLeftB = findChamferVertex(edge.vtxB, edge.triLeft);
-      // for right side
-      uint32_t idxRightA = findChamferVertex(edge.vtxA, edge.triRight);
-      uint32_t idxRightB = findChamferVertex(edge.vtxB, edge.triRight);
+      while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight)) {
 
-      uint32_t triangles[2][3] = {
-          {idxLeftA, idxRightB, idxLeftB},
-          {idxRightA, idxRightB, idxLeftA},
-      };
+        // split edge exists if
+        // - we have an edge between the two original triangles
+        // - but they are not connected in the rendermesh
 
-      for(uint32_t t = 0; t < 2; t++) {
-        uint32_t a = triangles[t][0];
-        uint32_t b = triangles[t][1];
-        uint32_t c = triangles[t][2];
-
-        if(a == b || a == c || b == c)
+        if(mesh.areTriAdjacent(triLeft, triRight))
           continue;
 
-        if(hasMaterials) {
-          builder.materialsC.push_back(part.materials[edge.triLeft]);
+        // find the right out vertex for this edge
+        auto findChamferVertex = [&](uint32_t v, uint32_t tri) {
+          Loader::BuilderRenderPart::VertexInfo outInfo  = builder.vtxOutInfo[v];
+          uint32_t                              outCount = outInfo.count;
+          for(uint32_t o = 0; o < outCount; o++) {
+            uint32_t                                   outIdx   = builder.vtxOutIndices[outInfo.begin + o];
+            const Loader::BuilderRenderPart::EdgePair& edgePair = builder.vtxOutEdgePairs[outInfo.begin + o];
+            if(edgePair.edge[0] == e && edgePair.tri[0] == tri) {
+              return vtxChamferBegin[v] + o;
+            }
+            if(edgePair.edge[1] == e && edgePair.tri[1] == tri) {
+              return vtxChamferBegin[v] + o;
+            }
+          }
+          assert(outCount == 1);
+          return builder.vtxOutIndices[outInfo.begin];
+        };
+
+        // find the two vertices for left side
+        uint32_t idxLeftA = findChamferVertex(edge.vtxA, triLeft);
+        uint32_t idxLeftB = findChamferVertex(edge.vtxB, triLeft);
+        // for right side
+        uint32_t idxRightA = findChamferVertex(edge.vtxA, triRight);
+        uint32_t idxRightB = findChamferVertex(edge.vtxB, triRight);
+
+        uint32_t triangles[2][3] = {
+            {idxLeftA, idxRightB, idxLeftB},
+            {idxRightA, idxRightB, idxLeftA},
+        };
+
+        for(uint32_t t = 0; t < 2; t++) {
+          uint32_t a = triangles[t][0];
+          uint32_t b = triangles[t][1];
+          uint32_t c = triangles[t][2];
+
+          if(a == b || a == c || b == c)
+            continue;
+
+          if(hasMaterials) {
+            builder.materialsC.push_back(part.materials[triLeft]);
+          }
+          builder.trianglesC.push_back(a);
+          builder.trianglesC.push_back(b);
+          builder.trianglesC.push_back(c);
         }
-        builder.trianglesC.push_back(a);
-        builder.trianglesC.push_back(b);
-        builder.trianglesC.push_back(c);
       }
     }
   }
@@ -1777,7 +1838,7 @@ public:
     return vertex;
   }
 
-  static void builderRenderPartBasic(Loader::BuilderRenderPart& builder, MeshFull& mesh, const LdrPart& part, const Loader::Config& config)
+  static void buildRenderPartBasic(Loader::BuilderRenderPart& builder, MeshFull& mesh, const LdrPart& part, const Loader::Config& config)
   {
     // start with unique vertices per triangle
 
@@ -1800,31 +1861,41 @@ public:
     // first is a vertex merge pass over all compatible edges
     for(uint32_t e = 0; e < mesh.numEdges; e++) {
 
-      const MeshFull::Edge& edge = mesh.edges[e];
+      MeshFull::Edge& edge = mesh.edges[e];
 
       if(edge.isOpen() || (edge.flag & EDGE_HARD_BIT))
         continue;
 
-      uint32_t triLeft  = edge.triLeft;
-      uint32_t triRight = edge.triRight;
-      uint32_t nmList   = edge.nmList;
+      uint32_t triLeft  = MeshFull::INVALID;
+      uint32_t triRight = MeshFull::INVALID;
+      uint32_t nmList   = MeshFull::INVALID;
 
-      while(triLeft != MeshFull::INVALID && triRight != MeshFull::INVALID) {
+      while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight)) {
 
         bool canMergeMaterial = !(checkMaterials) || (part.materials[triLeft] == part.materials[triLeft]);
 
         bool canMergeAngle = vec_dot(builder.triNormals[triLeft], builder.triNormals[triRight]) >= Loader::FORCED_HARD_EDGE_DOT;
+
+        if(!canMergeAngle) {
+          edge.flag |= EDGE_ANGLEHARD_BIT;
+        }
 
         if(canMergeMaterial && canMergeAngle) {
 
           uint32_t triLower  = std::min(triLeft, triRight);
           uint32_t triHigher = std::max(triLeft, triRight);
 
-          uint32_t lowerA = triLower * 3 + mesh.findTriangleVertex(triLower, edge.vtxA);
-          uint32_t lowerB = triLower * 3 + mesh.findTriangleVertex(triLower, edge.vtxB);
+          uint32_t lowerOrigA = mesh.findTriangleVertex(triLower, edge.vtxA);
+          uint32_t lowerOrigB = mesh.findTriangleVertex(triLower, edge.vtxB);
 
-          uint32_t higherA = triHigher * 3 + mesh.findTriangleVertex(triHigher, edge.vtxA);
-          uint32_t higherB = triHigher * 3 + mesh.findTriangleVertex(triHigher, edge.vtxB);
+          uint32_t lowerA = triLower * 3 + lowerOrigA;
+          uint32_t lowerB = triLower * 3 + lowerOrigB;
+
+          uint32_t higherOrigA = mesh.findTriangleVertex(triHigher, edge.vtxA);
+          uint32_t higherOrigB = mesh.findTriangleVertex(triHigher, edge.vtxB);
+
+          uint32_t higherA = triHigher * 3 + higherOrigA;
+          uint32_t higherB = triHigher * 3 + higherOrigB;
 
           builder.vertices[triangleVertices[lowerA]].normal =
               vec_add(builder.vertices[triangleVertices[lowerA]].normal, builder.vertices[triangleVertices[higherA]].normal);
@@ -1834,25 +1905,15 @@ public:
           // higher triangle will use lower's vertices
           triangleVertices[higherA] = triangleVertices[lowerA];
           triangleVertices[higherB] = triangleVertices[lowerB];
-        }
 
-        triLeft  = MeshFull::INVALID;
-        triRight = MeshFull::INVALID;
-
-        if(edge.isNonManifold()) {
-          // find next pairing
-          while(nmList != MeshFull::INVALID) {
-            const MeshFull::EdgeNM* edgeNM = mesh.iterateEdgeNM(nmList);
-            if(edgeNM->isLeft) {
-              triLeft  = edgeNM->tri;
-              triRight = MeshFull::INVALID;
-            }
-            else {
-              triRight = edgeNM->tri;
-            }
-
-            if(triLeft != MeshFull::INVALID && triRight != MeshFull::INVALID)
-              break;
+          // connect the triangles
+          if(triLower == triLeft) {
+            mesh.setTriAdjacency(triLeft, lowerOrigA, triRight);
+            mesh.setTriAdjacency(triRight, higherOrigB, triLeft);
+          }
+          else {
+            mesh.setTriAdjacency(triLeft, higherOrigA, triRight);
+            mesh.setTriAdjacency(triRight, lowerOrigB, triLeft);
           }
         }
       }
@@ -1867,21 +1928,28 @@ public:
         if(edge.isOpen() || (edge.flag & EDGE_HARD_BIT))
           continue;
 
-        uint32_t triLeft  = edge.triLeft;
-        uint32_t triRight = edge.triRight;
-        uint32_t nmList   = edge.nmList;
-        while(triLeft != MeshFull::INVALID && triRight != MeshFull::INVALID) {
+        uint32_t triLeft  = MeshFull::INVALID;
+        uint32_t triRight = MeshFull::INVALID;
+        uint32_t nmList   = MeshFull::INVALID;
+
+        while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight)) {
 
           bool canMergeMaterial = part.materials[triLeft] == part.materials[triLeft];
           bool canMergeAngle = vec_dot(builder.triNormals[triLeft], builder.triNormals[triRight]) >= Loader::FORCED_HARD_EDGE_DOT;
 
           if(!canMergeMaterial && !canMergeAngle) {
 
-            uint32_t leftA = triLeft * 3 + mesh.findTriangleVertex(triLeft, edge.vtxA);
-            uint32_t leftB = triLeft * 3 + mesh.findTriangleVertex(triLeft, edge.vtxB);
+            uint32_t leftOrigA = mesh.findTriangleVertex(triLeft, edge.vtxA);
+            uint32_t leftOrigB = mesh.findTriangleVertex(triLeft, edge.vtxB);
 
-            uint32_t rightA = triRight * 3 + mesh.findTriangleVertex(triRight, edge.vtxA);
-            uint32_t rightB = triRight * 3 + mesh.findTriangleVertex(triRight, edge.vtxB);
+            uint32_t leftA = triLeft * 3 + leftOrigA;
+            uint32_t leftB = triLeft * 3 + leftOrigB;
+
+            uint32_t rightOrigA = mesh.findTriangleVertex(triRight, edge.vtxA);
+            uint32_t rightOrigB = mesh.findTriangleVertex(triRight, edge.vtxB);
+
+            uint32_t rightA = triRight * 3 + rightOrigA;
+            uint32_t rightB = triRight * 3 + rightOrigB;
 
             LdrVector normalA =
                 vec_add(builder.vertices[triangleVertices[leftA]].normal, builder.vertices[triangleVertices[rightA]].normal);
@@ -1892,26 +1960,9 @@ public:
             builder.vertices[triangleVertices[rightA]].normal = normalA;
             builder.vertices[triangleVertices[leftB]].normal  = normalB;
             builder.vertices[triangleVertices[rightB]].normal = normalB;
-          }
 
-          triLeft  = MeshFull::INVALID;
-          triRight = MeshFull::INVALID;
-
-          if(edge.isNonManifold()) {
-            // find next pairing
-            while(nmList != MeshFull::INVALID) {
-              const MeshFull::EdgeNM* edgeNM = mesh.iterateEdgeNM(nmList);
-              if(edgeNM->isLeft) {
-                triLeft  = edgeNM->tri;
-                triRight = MeshFull::INVALID;
-              }
-              else {
-                triRight = edgeNM->tri;
-              }
-
-              if(triLeft != MeshFull::INVALID && triRight != MeshFull::INVALID)
-                break;
-            }
+            mesh.setTriAdjacency(triLeft, leftOrigA, triRight);
+            mesh.setTriAdjacency(triRight, rightOrigB, triLeft);
           }
         }
       }
@@ -1928,7 +1979,10 @@ public:
 
     // original vtx in / out
 
-    Loader::TVector<uint32_t> firstRenderVertex(part.num_positions, LDR_INVALID_IDX);
+    builder.vtxOutInfo.resize(part.num_positions);
+
+    Loader::TVector<uint32_t> vtxFirstRenderVertex(part.num_positions, LDR_INVALID_IDX);
+    Loader::TVector<uint32_t> renderVtxFirstTriangle(numVerticesNew, LDR_INVALID_IDX);
 
     for(uint32_t i = 0; i < builder.vertices.size(); i++) {
       if(remapCompact[i] != LDR_INVALID_IDX) {
@@ -1938,8 +1992,11 @@ public:
         // also normalize
         builder.vertices[v].normal = vec_normalize(builder.vertices[v].normal);
 
-        uint32_t origVertex           = part.triangles[i];
-        firstRenderVertex[origVertex] = std::min(firstRenderVertex[origVertex], v);
+        uint32_t origVertex = part.triangles[i];
+        builder.vtxOutInfo[origVertex].count++;
+
+        vtxFirstRenderVertex[origVertex] = std::min(vtxFirstRenderVertex[origVertex], v);
+        renderVtxFirstTriangle[v]        = std::min(renderVtxFirstTriangle[v], i / 3);
       }
 
       // compact indices
@@ -1948,27 +2005,91 @@ public:
       assert(builder.triangles[i] < numVerticesNew);
     }
 
+
+    if(config.renderpartChamfer) {
+      builder.vtxOutInfo.resize(part.num_positions);
+      builder.vtxOutIndices.resize(numVerticesNew);
+      builder.vtxOutEdgePairs.resize(numVerticesNew);
+
+      uint32_t base = 0;
+      for(uint32_t i = 0; i < part.num_positions; i++) {
+        builder.vtxOutInfo[i].begin = base;
+        base += builder.vtxOutInfo[i].count;
+        builder.vtxOutInfo[i].count = 0;
+      }
+
+      for(uint32_t i = 0; i < builder.vertices.size(); i++) {
+        if(remapCompact[i] != LDR_INVALID_IDX) {
+          uint32_t origVertex = part.triangles[i];
+          uint32_t v          = remapCompact[i];
+          builder.vtxOutIndices[builder.vtxOutInfo[origVertex].begin + (builder.vtxOutInfo[origVertex].count++)] = v;
+        }
+      }
+
+      for(uint32_t i = 0; i < part.num_positions; i++) {
+        Loader::BuilderRenderPart::VertexInfo outInfo = builder.vtxOutInfo[i];
+
+        if(outInfo.count < 2)
+          continue;
+
+        for(uint32_t o = 0; o < outInfo.count; o++) {
+          uint32_t rvtx = builder.vtxOutIndices[outInfo.begin + o];
+
+          // find the left and right open edges for this vertex if any
+          // pure material split may not introduce unconnected edges
+          Loader::BuilderRenderPart::EdgePair& pair = builder.vtxOutEdgePairs[outInfo.begin + o];
+
+          uint32_t firstTri = renderVtxFirstTriangle[rvtx];
+
+          // check both side edges
+          for(uint32_t s = 0; s < 2; s++) {
+            uint32_t tri      = firstTri;
+            bool     outgoing = s == 0;
+            while(tri != LDR_INVALID_IDX) {
+              uint32_t triVtx = mesh.findTriangleVertex(tri, i);
+
+              uint32_t triEdge = outgoing ? triVtx : (3 + triVtx - 1) % 3;
+              pair.tri[s]      = tri;
+              pair.triEdge[s]  = triEdge;
+
+              MeshFull::TriAdjacency triAdjacency = mesh.triAdjacencies[tri];
+              uint32_t               newTri       = triAdjacency.edgeTri[triEdge];
+              assert(tri != newTri);
+              tri = newTri;
+              if(tri == firstTri)
+                break;
+            }
+          }
+
+          for(uint32_t s = 0; s < 2; s++) {
+            const uint32_t* vertices = mesh.getTriangle(pair.tri[s]);
+            pair.edge[s]             = mesh.getEdgeIdx(vertices[pair.triEdge[s]], vertices[(pair.triEdge[s] + 1) % 3]);
+          }
+        }
+      }
+    }
+
     builder.vertices.resize(numVerticesNew);
 
     for(uint32_t i = 0; i < part.num_lines; i++) {
       uint32_t vertexA = part.lines[i * 2 + 0];
       uint32_t vertexB = part.lines[i * 2 + 1];
 
-      uint32_t renderVertexA = firstRenderVertex[vertexA];
+      uint32_t renderVertexA = vtxFirstRenderVertex[vertexA];
 
-      if (renderVertexA == LDR_INVALID_IDX) {
-        renderVertexA = builder.vertices.size();
-        firstRenderVertex[vertexA] = renderVertexA;
+      if(renderVertexA == LDR_INVALID_IDX) {
+        renderVertexA                 = builder.vertices.size();
+        vtxFirstRenderVertex[vertexA] = renderVertexA;
         builder.vertices.push_back(make_vertex(part.positions[vertexA]));
       }
-      
-      uint32_t renderVertexB = firstRenderVertex[vertexB];
+
+      uint32_t renderVertexB = vtxFirstRenderVertex[vertexB];
       if(renderVertexB == LDR_INVALID_IDX) {
-        renderVertexB = builder.vertices.size();
-        firstRenderVertex[vertexB] = renderVertexB;
+        renderVertexB                 = builder.vertices.size();
+        vtxFirstRenderVertex[vertexB] = renderVertexB;
         builder.vertices.push_back(make_vertex(part.positions[vertexB]));
       }
-      
+
       builder.lines.push_back(renderVertexA);
       builder.lines.push_back(renderVertexB);
     }
@@ -2000,7 +2121,11 @@ public:
       }
     }
 
-    builderRenderPartBasic(builder, mesh, part, config);
+    buildRenderPartBasic(builder, mesh, part, config);
+
+    if(config.renderpartChamfer) {
+      chamferRenderPart(mesh, builder, part, config.renderpartChamfer);
+    }
   }
 };
 

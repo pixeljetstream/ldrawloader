@@ -489,10 +489,15 @@ private:
 
     struct EdgePair
     {
-      uint32_t edgeA;
-      uint32_t edgeB;
-      uint32_t triA;
-      uint32_t triB;
+      uint32_t edge[2];
+      uint32_t tri[2];
+      uint32_t triEdge[2];
+    };
+
+    struct VertexInfo
+    {
+      uint32_t count = 0;
+      uint32_t begin = 0;
     };
 
     LdrPartFlag flag = {};
@@ -504,9 +509,9 @@ private:
     TVector<uint32_t>        trianglesC;
     TVector<LdrMaterialID>   materialsC;
 
-    TVector<LdrVector> triNormals;
-    TVector<uint32_t>  vtxOutCount;
-    TVector<uint32_t>  vtxOutBegin;
+    TVector<LdrVector>  triNormals;
+    TVector<VertexInfo> vtxOutInfo;
+    TVector<uint32_t>   vtxOutIndices;
 
     TVector<EdgePair> vtxOutEdgePairs;
 
