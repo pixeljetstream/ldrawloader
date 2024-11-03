@@ -88,7 +88,7 @@ extern "C" {
 #endif
 
 #define LDR_LOADER_VERSION_MAJOR 0
-#define LDR_LOADER_VERSION_MINOR 3
+#define LDR_LOADER_VERSION_MINOR 4
 #define LDR_LOADER_VERSION_CACHE 0
 
 #define LDR_INVALID_ID uint32_t(~0)

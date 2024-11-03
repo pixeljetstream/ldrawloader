@@ -1104,7 +1104,7 @@ static const uint32_t EDGE_HARD_BIT         = 1 << 0;
 static const uint32_t EDGE_OPTIONAL_BIT     = 1 << 1;
 static const uint32_t EDGE_HARD_FLOATER_BIT = 1 << 2;
 static const uint32_t EDGE_MATERIAL_BIT     = 1 << 3;
-static const uint32_t EDGE_ANGLEHARD_BIT    = 1 << 4;
+static const uint32_t EDGE_ANGLE_BIT        = 1 << 4;
 static const uint32_t EDGE_NONMANIFOLD      = 1 << 5;
 
 // separate class due to potential template usage for Mesh
@@ -1570,6 +1570,7 @@ public:
       Loader::BuilderRenderPart::VertexInfo outInfo  = builder.vtxOutInfo[v];
       uint32_t                              outCount = outInfo.count;
       if(outCount > 1) {
+
         vtxChamferBegin[v] = (uint32_t)builder.vertices.size();
 
         // find minimum chamfer length (distances per triangle cluster would be safer)
@@ -1601,7 +1602,6 @@ public:
           const MeshFull::Edge& edgeB = mesh.edges[edgePair.edge[1]];
           uint32_t              tri   = edgePair.tri[0];
           materialTri                 = tri;
-
 
           // algorithm described by Diana Algma https://github.com/dianx93
           // https://comserv.cs.ut.ee/home/files/Algma_ComputerScience_2018.pdf?study=ATILoputoo&reference=D4FE5BC8A22718CF3A52B308AD2B2B878C78EB36
@@ -1672,7 +1672,7 @@ public:
           }
 
           // just in case things go beyound south
-          if(isnan(chamferModifier) || isinf(chamferModifier)) {
+          if(isnan(chamferModifier) || isinf(chamferModifier) || (edgeA.isOpen() && edgeB.isOpen())) {
             chamferModifier = 0;
           }
 
@@ -1755,7 +1755,7 @@ public:
     for(uint32_t e = 0; e < mesh.numEdges; e++) {
       const MeshFull::Edge& edge = mesh.edges[e];
 
-      if(edge.isOpen() || !(edge.flag & (EDGE_ANGLEHARD_BIT | EDGE_HARD_BIT)))
+      if(edge.isOpen() || !(edge.flag & (EDGE_ANGLE_BIT | EDGE_HARD_BIT)))
         continue;
 
       uint32_t triLeft  = MeshFull::INVALID;
@@ -1877,44 +1877,58 @@ public:
         bool canMergeAngle = vec_dot(builder.triNormals[triLeft], builder.triNormals[triRight]) >= Loader::FORCED_HARD_EDGE_DOT;
 
         if(!canMergeAngle) {
-          edge.flag |= EDGE_ANGLEHARD_BIT;
+          edge.flag |= EDGE_ANGLE_BIT;
         }
 
         if(canMergeMaterial && canMergeAngle) {
 
-          uint32_t triLower  = std::min(triLeft, triRight);
-          uint32_t triHigher = std::max(triLeft, triRight);
+          uint32_t leftOrigA = mesh.findTriangleVertex(triLeft, edge.vtxA);
+          uint32_t leftOrigB = mesh.findTriangleVertex(triLeft, edge.vtxB);
 
-          uint32_t lowerOrigA = mesh.findTriangleVertex(triLower, edge.vtxA);
-          uint32_t lowerOrigB = mesh.findTriangleVertex(triLower, edge.vtxB);
+          uint32_t leftA = triLeft * 3 + leftOrigA;
+          uint32_t leftB = triLeft * 3 + leftOrigB;
 
-          uint32_t lowerA = triLower * 3 + lowerOrigA;
-          uint32_t lowerB = triLower * 3 + lowerOrigB;
+          uint32_t rightOrigA = mesh.findTriangleVertex(triRight, edge.vtxA);
+          uint32_t rightOrigB = mesh.findTriangleVertex(triRight, edge.vtxB);
 
-          uint32_t higherOrigA = mesh.findTriangleVertex(triHigher, edge.vtxA);
-          uint32_t higherOrigB = mesh.findTriangleVertex(triHigher, edge.vtxB);
+          uint32_t rightA = triRight * 3 + rightOrigA;
+          uint32_t rightB = triRight * 3 + rightOrigB;
 
-          uint32_t higherA = triHigher * 3 + higherOrigA;
-          uint32_t higherB = triHigher * 3 + higherOrigB;
+          // always use left-side vertex
+          builder.vertices[triangleVertices[leftA]].normal =
+              vec_add(builder.vertices[triangleVertices[leftA]].normal, builder.vertices[triangleVertices[rightA]].normal);
+          builder.vertices[triangleVertices[leftB]].normal =
+              vec_add(builder.vertices[triangleVertices[leftB]].normal, builder.vertices[triangleVertices[rightB]].normal);
 
-          builder.vertices[triangleVertices[lowerA]].normal =
-              vec_add(builder.vertices[triangleVertices[lowerA]].normal, builder.vertices[triangleVertices[higherA]].normal);
-          builder.vertices[triangleVertices[lowerB]].normal =
-              vec_add(builder.vertices[triangleVertices[lowerB]].normal, builder.vertices[triangleVertices[higherB]].normal);
+          // right triangle will use lefts's vertices
+          triangleVertices[rightA] = triangleVertices[leftA];
+          triangleVertices[rightA] = triangleVertices[leftB];
 
-          // higher triangle will use lower's vertices
-          triangleVertices[higherA] = triangleVertices[lowerA];
-          triangleVertices[higherB] = triangleVertices[lowerB];
+          // if right is already connected, we need to propagate its connections to point to left
+          // triangle vertices now
+          for(uint32_t s = 0; s < 2; s++) {
+            uint32_t tri      = triRight;
+            uint32_t rvtx     = s == 0 ? triangleVertices[leftA] : triangleVertices[leftB];
+            uint32_t vtx      = s == 0 ? edge.vtxA : edge.vtxB;
+            bool     outgoing = s == 0;
+            while(tri != LDR_INVALID_IDX) {
+              uint32_t triVtx = mesh.findTriangleVertex(tri, vtx);
+
+              uint32_t triEdge                   = outgoing ? triVtx : (3 + triVtx - 1) % 3;
+              triangleVertices[tri * 3 + triVtx] = rvtx;
+
+              MeshFull::TriAdjacency triAdjacency = mesh.triAdjacencies[tri];
+              uint32_t               newTri       = triAdjacency.edgeTri[triEdge];
+              assert(tri != newTri);
+              tri = newTri;
+              if(tri == triRight)
+                break;
+            }
+          }
 
           // connect the triangles
-          if(triLower == triLeft) {
-            mesh.setTriAdjacency(triLeft, lowerOrigA, triRight);
-            mesh.setTriAdjacency(triRight, higherOrigB, triLeft);
-          }
-          else {
-            mesh.setTriAdjacency(triLeft, higherOrigA, triRight);
-            mesh.setTriAdjacency(triRight, lowerOrigB, triLeft);
-          }
+          mesh.setTriAdjacency(triLeft, leftOrigA, triRight);
+          mesh.setTriAdjacency(triRight, rightOrigB, triLeft);
         }
       }
     }
