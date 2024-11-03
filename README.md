@@ -124,6 +124,17 @@ other languages. C++ 11 is required.
 * The chamfering algorithm is derived from the [Master's Thesis](https://comserv.cs.ut.ee/home/files/Algma_ComputerScience_2018.pdf?study=ATILoputoo&reference=D4FE5BC8A22718CF3A52B308AD2B2B878C78EB36) of [Diana Algma](https://github.com/dianx93)
 * The vertex merging is a modified line-sweep, with sorted vertices along a single vector and was inspired by the algorithm in http://www.assimp.org/
 
+# History
+
+- 11/3/2024 Version 0.4: 
+  - major overhaul
+  - revised non-manifold handling completely, more resililent to non manifold edges
+  - improve renderpart building for better vertex splitting / smoothing and improve chamfer
+  - chamfer no longer relies on fixing t-junctions
+- 2/4/2024 Version 0.3: improve material handling and support color codes
+- 1/5/2020 Version 0.2: various fixes
+- 8/18/2019 Version 0.1: initial release
+
 # Other Related Projects
 In case this is not what you were looking for, here are some other related projects to working with ldr files.
 
