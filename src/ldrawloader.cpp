@@ -500,17 +500,6 @@ public:
     //return vec_normalize(vec_cross(sides[0], vec_neg(sides[2])));
   }
 
-  // accounts for non-manifold edges
-  inline uint32_t getBestOtherTriangle(uint32_t t, const Edge& edge) const
-  {
-    if(edge.isNonManifold()) {
-      // find in nm edge list
-    }
-    else {
-      return edge.otherTri(t);
-    }
-  }
-
   inline const uint32_t getTriangleOtherVertex(uint32_t t, const Edge& edge) const
   {
     uint32_t idxA = triangles[t * 3 + 0];
@@ -1060,6 +1049,43 @@ public:
     nonManifoldNeedsOrdering = false;
   }
 
+  bool areTrianglesPaired(const Edge& edge, uint32_t t0, uint32_t t1) const
+  {
+    if((edge.triLeft == t0 && edge.triRight != t1) || (edge.triLeft == t1 && edge.triRight != t0))
+      return false;
+
+    if((edge.triLeft == t0 && edge.triRight == t1) || (edge.triLeft == t1 && edge.triRight == t0))
+      return true;
+
+
+    uint32_t triLeft  = INVALID;
+    uint32_t triRight = INVALID;
+    uint32_t nmList   = edge.nmList;
+
+    // find next pairing
+    while(nmList != INVALID) {
+      const EdgeNM* edgeNM = iterateEdgeNM(nmList);
+      if(edgeNM->isLeft) {
+        triLeft  = edgeNM->tri;
+        triRight = INVALID;
+      }
+      else {
+        triRight = edgeNM->tri;
+      }
+
+      if(triLeft != INVALID && triRight != INVALID) {
+
+        if((triLeft == t0 && triRight == t1) || (triLeft == t1 && triRight == t0))
+          return true;
+
+        triLeft  = INVALID;
+        triRight = INVALID;
+      }
+    }
+
+    return false;
+  }
+
   bool iterateTrianglePairs(const Edge& edge, uint32_t& nmList, uint32_t& triLeft, uint32_t& triRight) const
   {
     if(triLeft == INVALID) {
@@ -1547,8 +1573,8 @@ public:
   static void chamferRenderPart(MeshFull& mesh, Loader::BuilderRenderPart& builder, const LdrPart& part, const float chamferPreferred)
   {
     // copy over original triangles first
-    Loader::TVector<uint32_t> smoothedTriangles = builder.triangles;
-    builder.trianglesC                          = builder.triangles;
+    Loader::TVector<uint32_t> renderTriangles = builder.triangles;
+    builder.trianglesC                        = builder.triangles;
     builder.materialsC.resize(part.flag.hasComplexMaterial ? part.num_triangles : 0);
 
     bool hasMaterials = !builder.materialsC.empty();
@@ -1699,7 +1725,7 @@ public:
 
           for(uint32_t t = 0; t < triCount; t++) {
             const uint32_t  triBegin = triIndices[t] * 3;
-            const uint32_t* indices  = &smoothedTriangles[triBegin];
+            const uint32_t* indices  = &renderTriangles[triBegin];
             if(indices[0] == outIdx)
               builder.trianglesC[triBegin + 0] = newIdx;
             if(indices[1] == outIdx)
@@ -1709,45 +1735,64 @@ public:
           }
         }
 
-        // create "inner triangle" based on out vertex count
-        // 2 -> nothing
-        // 3 -> 1 triangle
-        // 4 -> 2 triangles
-        // 5 -> 5 triangles with center point (NYI)
-
-        // fixme, naive actual implementation outcount > 4 needs other logic
-#if 1
-        uint32_t outTriangleCount = outCount > 4 ? outCount : (outCount > 2 ? outCount - 2 : 0);
-        uint32_t lastIndex        = builder.vertices.size();
-        if(outTriangleCount > 2) {
-          avgNormal = vec_normalize(avgNormal);
-          builder.vertices.push_back({vec_mul(avgPos, 1.0f / float(outCount)), 0, avgNormal});
+        if(v == 13) {
+          v = v;
         }
 
-        for(uint32_t t = 0; t < outTriangleCount; t++) {
-          uint32_t a = vtxChamferBegin[v] + t + 0;
-          uint32_t b = vtxChamferBegin[v] + (t + 1) % outCount;
-          uint32_t c = outTriangleCount > 2 ? lastIndex : vtxChamferBegin[v] + t + 2;
+        uint32_t groupStart  = 0;
+        uint32_t groupLength = 0;
+        for(uint32_t g = 0; g < outInfo.groupCount; g++) {
 
-          LdrVector normal = vec_cross(vec_sub(builder.vertices[b].position, builder.vertices[a].position),
-                                       vec_sub(builder.vertices[c].position, builder.vertices[a].position));
-
-          if(vec_dot(normal, avgNormal) < 0) {
-            builder.trianglesC.push_back(c);
-            builder.trianglesC.push_back(b);
-            builder.trianglesC.push_back(a);
-          }
-          else {
-            builder.trianglesC.push_back(a);
-            builder.trianglesC.push_back(b);
-            builder.trianglesC.push_back(c);
+          groupLength = 0;
+          for(uint32_t og = groupStart; og < outInfo.count; og++) {
+            const Loader::BuilderRenderPart::EdgePair& pair = builder.vtxOutEdgePairs[outInfo.begin + og];
+            if(pair.group != g) {
+              break;
+            }
+            groupLength++;
           }
 
-          if(hasMaterials) {
-            builder.materialsC.push_back(part.materials[materialTri]);
+          // create "inner triangle" based on out vertex count
+          // 2 -> nothing
+          // 3 -> 1 triangle
+          // 4 -> 2 triangles
+          // 5 -> 5 triangles with center point (NYI)
+
+          // fixme, naive actual implementation outcount > 4 needs other logic
+
+          uint32_t outTriangleCount = groupLength > 4 ? groupLength : (groupLength > 2 ? groupLength - 2 : 0);
+          uint32_t lastIndex        = builder.vertices.size();
+          if(outTriangleCount > 2) {
+            avgNormal = vec_normalize(avgNormal);
+            builder.vertices.push_back({vec_mul(avgPos, 1.0f / float(groupLength)), 0, avgNormal});
           }
+
+          for(uint32_t t = 0; t < outTriangleCount; t++) {
+            uint32_t a = vtxChamferBegin[v] + groupStart + t + 0;
+            uint32_t b = vtxChamferBegin[v] + groupStart + (t + 1) % groupLength;
+            uint32_t c = outTriangleCount > 2 ? lastIndex : vtxChamferBegin[v] + groupStart + t + 2;
+
+            LdrVector normal = vec_cross(vec_sub(builder.vertices[b].position, builder.vertices[a].position),
+                                         vec_sub(builder.vertices[c].position, builder.vertices[a].position));
+
+            if(vec_dot(normal, avgNormal) < 0) {
+              builder.trianglesC.push_back(c);
+              builder.trianglesC.push_back(b);
+              builder.trianglesC.push_back(a);
+            }
+            else {
+              builder.trianglesC.push_back(a);
+              builder.trianglesC.push_back(b);
+              builder.trianglesC.push_back(c);
+            }
+
+            if(hasMaterials) {
+              builder.materialsC.push_back(part.materials[materialTri]);
+            }
+          }
+
+          groupStart += groupLength;
         }
-#endif
       }
     }
 
@@ -2025,9 +2070,11 @@ public:
       builder.vtxOutIndices.resize(numVerticesNew);
       builder.vtxOutEdgePairs.resize(numVerticesNew);
 
-      uint32_t base = 0;
+      uint32_t base        = 0;
+      uint32_t maxOutCount = 0;
       for(uint32_t i = 0; i < part.num_positions; i++) {
         builder.vtxOutInfo[i].begin = base;
+        maxOutCount                 = std::max(maxOutCount, builder.vtxOutInfo[i].count);
         base += builder.vtxOutInfo[i].count;
         builder.vtxOutInfo[i].count = 0;
       }
@@ -2040,18 +2087,32 @@ public:
         }
       }
 
+      Loader::TVector<uint32_t>                            localOutIdx(maxOutCount, 0);
+      Loader::TVector<uint32_t>                            localVertices(maxOutCount, 0);
+      Loader::TVector<Loader::BuilderRenderPart::EdgePair> localPairs(maxOutCount);
+
       for(uint32_t i = 0; i < part.num_positions; i++) {
-        Loader::BuilderRenderPart::VertexInfo outInfo = builder.vtxOutInfo[i];
+        Loader::BuilderRenderPart::VertexInfo& outInfo = builder.vtxOutInfo[i];
 
         if(outInfo.count < 2)
           continue;
 
+        memset(localOutIdx.data(), LDR_INVALID_IDX, maxOutCount * sizeof(uint32_t));
+
+        if(i == 13) {
+          i = i;
+        }
+
         for(uint32_t o = 0; o < outInfo.count; o++) {
           uint32_t rvtx = builder.vtxOutIndices[outInfo.begin + o];
 
+          localVertices[o] = rvtx;
+
           // find the left and right open edges for this vertex if any
           // pure material split may not introduce unconnected edges
-          Loader::BuilderRenderPart::EdgePair& pair = builder.vtxOutEdgePairs[outInfo.begin + o];
+          Loader::BuilderRenderPart::EdgePair& pair = localPairs[o];
+          pair.pairs[0]                             = LDR_INVALID_IDX;
+          pair.pairs[1]                             = LDR_INVALID_IDX;
 
           uint32_t firstTri = renderVtxFirstTriangle[rvtx];
 
@@ -2079,6 +2140,70 @@ public:
             const uint32_t* vertices = mesh.getTriangle(pair.tri[s]);
             pair.edge[s]             = mesh.getEdgeIdx(vertices[pair.triEdge[s]], vertices[(pair.triEdge[s] + 1) % 3]);
           }
+
+          for(uint32_t p = 0; p < o; p++) {
+            Loader::BuilderRenderPart::EdgePair& ppair = localPairs[p];
+
+            // connect pairs with other pairs
+
+            if((ppair.edge[0] == pair.edge[0] || ppair.edge[1] == pair.edge[0])
+               && mesh.areTrianglesPaired(mesh.edges[pair.edge[0]], pair.tri[0],
+                                          ppair.edge[1] == pair.edge[0] ? ppair.tri[0] : ppair.tri[1])) {
+
+              pair.pairs[0]                                      = p;
+              ppair.pairs[ppair.edge[0] == pair.edge[0] ? 0 : 1] = o;
+            }
+
+            if((ppair.edge[0] == pair.edge[1] || ppair.edge[1] == pair.edge[1])
+               && mesh.areTrianglesPaired(mesh.edges[pair.edge[1]], pair.tri[1],
+                                          ppair.edge[1] == pair.edge[1] ? ppair.tri[0] : ppair.tri[1])) {
+
+              pair.pairs[1]                                      = p;
+              ppair.pairs[ppair.edge[0] == pair.edge[1] ? 0 : 1] = o;
+            }
+          }
+        }
+
+        // build connected groups
+
+        uint32_t newOutCount = 0;
+
+        for(uint32_t s = 0; s < 2; s++) {
+          // first pass is find those that are not dual connected.
+          // otherwise can start at any
+
+          for(uint32_t o = 0; o < outInfo.count; o++) {
+            if(localOutIdx[o] == LDR_INVALID_IDX
+               && ((s == 0 && localPairs[o].pairs[0] == LDR_INVALID_IDX || localPairs[o].pairs[1] == LDR_INVALID_IDX) || s)) {
+              // walk onesided
+              localOutIdx[o]      = newOutCount++;
+              localPairs[o].group = outInfo.groupCount;
+
+              uint32_t prev = o;
+              uint32_t next = localPairs[o].pairs[0] == LDR_INVALID_IDX ? localPairs[o].pairs[1] : localPairs[o].pairs[0];
+              while(next != LDR_INVALID_IDX) {
+                assert(localOutIdx[next] == LDR_INVALID_IDX);
+                localPairs[next].group = outInfo.groupCount;
+                localOutIdx[next]      = newOutCount++;
+                uint32_t tmp           = next;
+                next = localPairs[next].pairs[0] == prev ? localPairs[next].pairs[1] : localPairs[next].pairs[0];
+                assert(next != prev);
+                prev = tmp;
+                // circle
+                if(next == o)
+                  break;
+              }
+
+              outInfo.groupCount++;
+            }
+          }
+        }
+
+        // output re-ordered
+        for(uint32_t o = 0; o < outInfo.count; o++) {
+          uint32_t oIdx                                 = localOutIdx[o];
+          builder.vtxOutIndices[outInfo.begin + oIdx]   = localVertices[o];
+          builder.vtxOutEdgePairs[outInfo.begin + oIdx] = localPairs[o];
         }
       }
     }
