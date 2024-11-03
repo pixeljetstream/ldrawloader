@@ -489,15 +489,17 @@ private:
 
     struct EdgePair
     {
+      uint32_t group;
+      uint32_t pairs[2];
       uint32_t edge[2];
       uint32_t tri[2];
-      uint32_t triEdge[2];
     };
 
     struct VertexInfo
     {
-      uint32_t count = 0;
-      uint32_t begin = 0;
+      uint32_t count      = 0;
+      uint32_t begin      = 0;
+      uint32_t groupCount = 0;
     };
 
     LdrPartFlag flag = {};
