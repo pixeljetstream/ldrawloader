@@ -485,6 +485,7 @@ private:
     Loader* loader = nullptr;  // mostly for debugging
 
     inline bool isQuad(uint32_t t) const { return quads[t] != LDR_INVALID_IDX; }
+    bool        isSameTriangle(uint32_t tA, uint32_t tB) const;
     bool        isSameQuad(uint32_t tA, uint32_t tB) const;
     void        getCanonicalQuad(uint32_t t, uint32_t quad[4]) const;
   };

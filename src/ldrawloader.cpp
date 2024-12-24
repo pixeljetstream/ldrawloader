@@ -1121,17 +1121,18 @@ class MeshUtils
 public:
   static void removeCoplanarTriangle(Mesh& mesh, Loader::BuilderPart& builder, const LdrVector& normal, uint32_t t, uint32_t tOther)
   {
-    LdrVector normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
+    if(mesh.triAlive.getBit(t) && (builder.isSameTriangle(t, tOther) || builder.isSameQuad(t, tOther)))
+    {
+      mesh.removeTriangle(t);
+      return;
+    }
 
+    LdrVector normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
     if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT)
     {
 #if defined(_DEBUG) && LDR_DEBUG_PRINT_NON_MANIFOLDS
       printf("nonmanifold coplanar: t %d %d - %s\n", t, tOther, builder.filename.c_str());
 #endif
-      if(mesh.triAlive.getBit(t) && (mesh.areTrianglesSame(t, tOther) || builder.isSameQuad(t, tOther)))
-      {
-        mesh.removeTriangle(t);
-      }
     }
   }
 
@@ -4499,6 +4500,27 @@ void Loader::deinitRenderModel(LdrRenderModel& model)
 {
   rawFree(&model.raw);
   model.raw = {0, 0};
+}
+
+bool Loader::BuilderPart::isSameTriangle(uint32_t tA, uint32_t tB) const
+{
+  const uint32_t* trisA = &triangles[tA * 3];
+  const uint32_t* trisB = &triangles[tB * 3];
+
+  for(uint32_t v = 0; v < 3; v++)
+  {
+    if(trisA[0] == trisB[v])
+    {
+      for(uint32_t i = 1; i < 3; i++)
+      {
+        if(trisA[i] != trisB[(v + i) % 3])
+          return false;
+      }
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool Loader::BuilderPart::isSameQuad(uint32_t tA, uint32_t tB) const
