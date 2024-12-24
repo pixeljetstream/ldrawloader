@@ -186,7 +186,8 @@ inline void bbox_merge(LdrBbox& bbox, const LdrMatrix& transform, const LdrBbox 
   const float* values = &other.min.x;
   uint32_t     min    = 0;
   uint32_t     max    = uint32_t(offsetof(LdrBbox, max) / sizeof(float));
-  for(int i = 0; i < 8; i++) {
+  for(int i = 0; i < 8; i++)
+  {
     LdrVector corner;
     corner.x        = values[(i & 1 ? max : min) + 0];
     corner.y        = values[(i & 2 ? max : min) + 1];
@@ -220,10 +221,12 @@ public:
 
   static vtxPair_t make_vtxPair(uint32_t vtxA, uint32_t vtxB)
   {
-    if(vtxA < vtxB) {
+    if(vtxA < vtxB)
+    {
       return vtxPair_t(vtxA) | (vtxPair_t(vtxB) << VTX_BITS);
     }
-    else {
+    else
+    {
       return vtxPair_t(vtxB) | (vtxPair_t(vtxA) << VTX_BITS);
     }
   }
@@ -262,13 +265,15 @@ public:
     {
       uint32_t old    = infos[v].count++;
       uint32_t offset = infos[v].offset;
-      if(infos[v].allocated < infos[v].count) {
+      if(infos[v].allocated < infos[v].count)
+      {
         uint32_t newoffset = (uint32_t)content.size();
         infos[v].allocated += GROWTH;
         infos[v].offset = newoffset;
         content.reserve(std::max(content.size(), (content.size() * 3) / 2));
         content.resize(content.size() + infos[v].allocated);
-        if(old) {
+        if(old)
+        {
           memcpy(content.data() + newoffset, content.data() + offset, sizeof(uint32_t) * old);
         }
 
@@ -282,8 +287,10 @@ public:
     {
       uint32_t* data  = content.data() + infos[v].offset;
       uint32_t  count = infos[v].count;
-      for(uint32_t i = 0; i < count; i++) {
-        if(data[i] == element) {
+      for(uint32_t i = 0; i < count; i++)
+      {
+        if(data[i] == element)
+        {
           data[i] = data[count - 1];
           infos[v].count--;
         }
@@ -368,11 +375,13 @@ public:
     numVertices = num;
     vtxEdges.resize(numVertices);
 
-    if(VTX_TRIS) {
+    if(VTX_TRIS)
+    {
       vtxTriangles.resize(numVertices);
     }
 
-    if(num > (1 << VTX_BITS)) {
+    if(num > (1 << VTX_BITS))
+    {
       // FIXME check against this error
       fprintf(stderr, "Mesh VTX_BITS too small - %d > %d\n", num, (1 << VTX_BITS));
       exit(-1);
@@ -387,7 +396,8 @@ public:
     uint32_t        open = 0;
     uint32_t        count;
     const uint32_t* curEdges = vtxEdges.getConnected(vertex, count);
-    for(uint32_t e = 0; e < count; e++) {
+    for(uint32_t e = 0; e < count; e++)
+    {
       open += edges[curEdges[e]].isOpen() && !edges[curEdges[e]].isDead();
     }
     return open == 2;
@@ -396,7 +406,8 @@ public:
   inline Edge* getEdge(uint32_t vtxA, uint32_t vtxB)
   {
     const auto it = lookupEdge.find(make_vtxPair(vtxA, vtxB));
-    if(it != lookupEdge.cend()) {
+    if(it != lookupEdge.cend())
+    {
       return &edges[it->second];
     }
     return nullptr;
@@ -405,7 +416,8 @@ public:
   inline const Edge* getEdge(uint32_t vtxA, uint32_t vtxB) const
   {
     const auto it = lookupEdge.find(make_vtxPair(vtxA, vtxB));
-    if(it != lookupEdge.cend()) {
+    if(it != lookupEdge.cend())
+    {
       return &edges[it->second];
     }
     return nullptr;
@@ -414,7 +426,8 @@ public:
   inline uint32_t getEdgeIdx(uint32_t vtxA, uint32_t vtxB) const
   {
     const auto it = lookupEdge.find(make_vtxPair(vtxA, vtxB));
-    if(it != lookupEdge.cend()) {
+    if(it != lookupEdge.cend())
+    {
       return it->second;
     }
     return INVALID;
@@ -454,11 +467,13 @@ public:
   {
     uint32_t lowestIdx = indices[0];
     uint32_t lowest    = 0;
-    if(indices[1] < lowestIdx) {
+    if(indices[1] < lowestIdx)
+    {
       lowestIdx = indices[1];
       lowest    = 1;
     }
-    if(indices[2] < lowestIdx) {
+    if(indices[2] < lowestIdx)
+    {
       lowestIdx = indices[2];
       lowest    = 2;
     }
@@ -474,7 +489,8 @@ public:
     uint32_t lowest1 = findLowest(indices1);
     uint32_t lowest2 = findLowest(indices2);
 
-    for(uint32_t i = 0; i < 3; i++) {
+    for(uint32_t i = 0; i < 3; i++)
+    {
       if(indices1[(lowest1 + i) % 3] != indices2[(lowest2 + i) % 3])
         return false;
     }
@@ -492,12 +508,15 @@ public:
     float     minAngle = FLT_MAX;
     uint32_t  corner   = 0;
 
-    for(uint32_t i = 0; i < 3; i++) {
+    for(uint32_t i = 0; i < 3; i++)
+    {
       sides[i] = vec_normalize(vec_sub(positions[triangles[t * 3 + i]], positions[triangles[t * 3 + (i + 1) % 3]]));
     }
-    for(uint32_t i = 0; i < 3; i++) {
+    for(uint32_t i = 0; i < 3; i++)
+    {
       float angle = fabsf(vec_dot(vec_neg(sides[i]), sides[(i + 1) % 3]));
-      if(angle < minAngle) {
+      if(angle < minAngle)
+      {
         minAngle = angle;
         corner   = i;
       }
@@ -550,11 +569,13 @@ public:
   {
     uint32_t nextNM = startNM;
 
-    while(nextNM != INVALID) {
+    while(nextNM != INVALID)
+    {
       EdgeNM& edgeNM = edgesNM[nextNM];
       if(edgeNM.tri == tri)
         return startNM;
-      if(areTrianglesSame(edgeNM.tri, tri)) {
+      if(areTrianglesSame(edgeNM.tri, tri))
+      {
         identicalNeighbor = true;
         return startNM;
       }
@@ -563,7 +584,8 @@ public:
     }
 
     uint32_t outNextNM;
-    if(freeNM != INVALID) {
+    if(freeNM != INVALID)
+    {
       outNextNM = freeNM;
       freeNM    = edgesNM[freeNM].nextNM;
 
@@ -571,7 +593,8 @@ public:
       edgesNM[outNextNM].nextNM = startNM;
       edgesNM[outNextNM].isLeft = isLeft;
     }
-    else {
+    else
+    {
       outNextNM = edgesNM.size();
       edgesNM.push_back({tri, startNM, isLeft, 0});
     }
@@ -581,9 +604,11 @@ public:
 
   uint32_t findFirstEdgeNM(uint32_t nextNM, bool isLeft) const
   {
-    while(nextNM != INVALID) {
+    while(nextNM != INVALID)
+    {
       const EdgeNM& edgeNM = edgesNM[nextNM];
-      if(edgeNM.isLeft == isLeft) {
+      if(edgeNM.isLeft == isLeft)
+      {
         return edgeNM.tri;
       }
       nextNM = edgeNM.nextNM;
@@ -594,7 +619,8 @@ public:
 
   const EdgeNM* iterateEdgeNM(uint32_t& startNM) const
   {
-    if(startNM != INVALID) {
+    if(startNM != INVALID)
+    {
       uint32_t current = startNM;
       startNM          = edgesNM[startNM].nextNM;
       return &edgesNM[current];
@@ -604,7 +630,8 @@ public:
 
   EdgeNM* iterateEdgeNM(uint32_t& startNM)
   {
-    if(startNM != INVALID) {
+    if(startNM != INVALID)
+    {
       uint32_t current = startNM;
       startNM          = edgesNM[startNM].nextNM;
       return &edgesNM[current];
@@ -617,19 +644,23 @@ public:
     uint32_t nextNM = startNM;
     uint32_t prevNM = INVALID;
 
-    while(nextNM != INVALID) {
+    while(nextNM != INVALID)
+    {
       EdgeNM& edgeNM = edgesNM[nextNM];
-      if(edgeNM.tri == tri) {
+      if(edgeNM.tri == tri)
+      {
         uint32_t oldNextNM = edgeNM.nextNM;
         // insert into freelist
         edgeNM.nextNM = freeNM;
         edgeNM.tri    = INVALID;
         freeNM        = nextNM;
 
-        if(prevNM != INVALID) {
+        if(prevNM != INVALID)
+        {
           edgesNM[prevNM].nextNM = oldNextNM;
         }
-        else {
+        else
+        {
           // change list head
           startNM = oldNextNM;
         }
@@ -651,20 +682,25 @@ public:
     vtxPair_t pair = make_vtxPair(vtxA, vtxB);
     auto      it   = lookupEdge.find(pair);
 
-    if(it != lookupEdge.end()) {
+    if(it != lookupEdge.end())
+    {
       Edge& edge = edges[it->second];
 
-      if(edge.triLeft == tri || edge.triRight == tri) {
+      if(edge.triLeft == tri || edge.triRight == tri)
+      {
         it = it;
       }
-      else if(vtxA == edge.vtxB && edge.triRight == INVALID) {
-        if(areTrianglesSame(edge.triLeft, tri)) {
+      else if(vtxA == edge.vtxB && edge.triRight == INVALID)
+      {
+        if(areTrianglesSame(edge.triLeft, tri))
+        {
           identicalNeighbor = true;
           return;
         }
         edge.triRight = tri;
       }
-      else {
+      else
+      {
         edge.nmList = addEdgeNM(edge.nmList, tri, edge.vtxA == vtxA, identicalNeighbor);
         if(identicalNeighbor)
           return;
@@ -675,7 +711,8 @@ public:
 
       return;
     }
-    else {
+    else
+    {
       uint32_t edgeIdx = numEdges;
       Edge     edge;
       edge.vtxA       = vtxA;
@@ -705,11 +742,14 @@ public:
       return;
 
     Edge& edge = edges[it->second];
-    if(!edge.isNonManifold()) {
-      if(edge.triRight == tri) {
+    if(!edge.isNonManifold())
+    {
+      if(edge.triRight == tri)
+      {
         edge.triRight = INVALID;
       }
-      else if(edge.triRight != INVALID) {
+      else if(edge.triRight != INVALID)
+      {
         // if only right left, migrate right to left
         edge.triLeft  = edge.triRight;
         uint32_t temp = edge.vtxB;
@@ -717,7 +757,8 @@ public:
         edge.vtxA     = temp;
         edge.triRight = INVALID;
       }
-      else {
+      else
+      {
         edge.triLeft = INVALID;
 
         vtxEdges.remove(edge.vtxA, it->second);
@@ -726,7 +767,8 @@ public:
         lookupEdge.erase(pair);
       }
     }
-    else {
+    else
+    {
       bool isLeft   = edge.vtxA == vtxA;
       bool popFirst = edge.triLeft == tri || edge.triRight == tri;
 
@@ -734,12 +776,14 @@ public:
       uint32_t removeTri = tri;
 
       // find first with matching state
-      if(edge.triLeft == tri) {
+      if(edge.triLeft == tri)
+      {
         edge.triLeft             = first;
         removeTri                = first;
         nonManifoldNeedsOrdering = true;
       }
-      else if(edge.triRight == tri) {
+      else if(edge.triRight == tri)
+      {
         edge.triRight = first;
         removeTri     = first;
       }
@@ -747,7 +791,8 @@ public:
       removeEdgeNM(edge.nmList, removeTri);
 
       // if only right exist, migrate right to left
-      if(edge.triLeft == INVALID && edge.triRight != INVALID) {
+      if(edge.triLeft == INVALID && edge.triRight != INVALID)
+      {
         edge.triLeft  = edge.triRight;
         uint32_t temp = edge.vtxB;
         edge.vtxB     = edge.vtxA;
@@ -755,11 +800,13 @@ public:
         edge.triRight = INVALID;
         // flip left/right in edgeNM list
         uint32_t nextNM = edge.nmList;
-        while(nextNM != INVALID) {
+        while(nextNM != INVALID)
+        {
           iterateEdgeNM(nextNM)->isLeft ^= true;
         }
       }
-      else if(edge.triLeft == INVALID) {
+      else if(edge.triLeft == INVALID)
+      {
         vtxEdges.remove(edge.vtxA, it->second);
         vtxEdges.remove(edge.vtxB, it->second);
 
@@ -785,13 +832,15 @@ public:
     addEdge(idxB, idxC, t, nonManifold, identicalNeighbor);
     addEdge(idxC, idxA, t, nonManifold, identicalNeighbor);
 
-    if(VTX_TRIS && !identicalNeighbor) {
+    if(VTX_TRIS && !identicalNeighbor)
+    {
       vtxTriangles.add(idxA, t);
       vtxTriangles.add(idxB, t);
       vtxTriangles.add(idxC, t);
     }
 
-    if(triAlive.size() <= t) {
+    if(triAlive.size() <= t)
+    {
       triAlive.resize(t + 1, false);
       numTriangles = t + 1;
     }
@@ -815,12 +864,14 @@ public:
     removeEdge(idxB, idxC, t);
     removeEdge(idxC, idxA, t);
 
-    if(VTX_TRIS) {
+    if(VTX_TRIS)
+    {
       vtxTriangles.remove(idxA, t);
       vtxTriangles.remove(idxB, t);
       vtxTriangles.remove(idxC, t);
     }
-    if(flagDead) {
+    if(flagDead)
+    {
       triAlive.setBit(t, false);
     }
   }
@@ -849,11 +900,13 @@ public:
     bool nonManifold = false;
     initBasics(numV, numT, tris, _loader);
 
-    for(uint32_t t = 0; t < numT; t++) {
+    for(uint32_t t = 0; t < numT; t++)
+    {
       nonManifold = (addTriangle(t) != INVALID) || nonManifold;
     }
 
-    if(nonManifold) {
+    if(nonManifold)
+    {
       orderNonManifoldByAngle(positions);
     }
 
@@ -907,7 +960,8 @@ public:
     Loader::TVector<SortEdge> sortEdges;
     sortEdges.reserve(128);
 
-    for(uint32_t e = 0; e < numEdges; e++) {
+    for(uint32_t e = 0; e < numEdges; e++)
+    {
       Edge& edge = edges[e];
       if(!(edge.isNonManifold()))
         continue;
@@ -919,7 +973,8 @@ public:
 
       // compute angles and push into sorting queue
 
-      if(edge.triRight != INVALID) {
+      if(edge.triRight != INVALID)
+      {
         SortEdge sedge;
         sedge.angle  = basis.getAngle(positions[getTriangleOtherVertex(edge.triRight, edge)]);
         sedge.isLeft = false;
@@ -928,7 +983,8 @@ public:
       }
 
       uint32_t nextNM = edge.nmList;
-      while(nextNM != Mesh::INVALID) {
+      while(nextNM != Mesh::INVALID)
+      {
         const EdgeNM& edgeNM = edgesNM[nextNM];
         SortEdge      sedge;
         sedge.angle  = basis.getAngle(positions[getTriangleOtherVertex(edgeNM.tri, edge)]);
@@ -943,14 +999,17 @@ public:
       nextNM        = edge.nmList;
       edge.triRight = INVALID;
 
-      for(uint32_t se = 0; se < sortEdges.size(); se++) {
+      for(uint32_t se = 0; se < sortEdges.size(); se++)
+      {
         const SortEdge& sedge = sortEdges[se];
 
-        if(!sedge.isLeft && edge.triRight == INVALID) {
+        if(!sedge.isLeft && edge.triRight == INVALID)
+        {
           edge.triRight   = sedge.tri;
           edge.angleRight = sedge.angle;
         }
-        else {
+        else
+        {
           EdgeNM& edgeNM = edgesNM[nextNM];
           edgeNM.angle   = sedge.angle;
           edgeNM.tri     = sedge.tri;
@@ -977,17 +1036,21 @@ public:
     uint32_t nmList   = edge.nmList;
 
     // find next pairing
-    while(nmList != INVALID) {
+    while(nmList != INVALID)
+    {
       const EdgeNM* edgeNM = iterateEdgeNM(nmList);
-      if(edgeNM->isLeft) {
+      if(edgeNM->isLeft)
+      {
         triLeft  = edgeNM->tri;
         triRight = INVALID;
       }
-      else {
+      else
+      {
         triRight = edgeNM->tri;
       }
 
-      if(triLeft != INVALID && triRight != INVALID) {
+      if(triLeft != INVALID && triRight != INVALID)
+      {
 
         if((triLeft == t0 && triRight == t1) || (triLeft == t1 && triRight == t0))
           return true;
@@ -1002,24 +1065,30 @@ public:
 
   bool iterateTrianglePairs(const Edge& edge, uint32_t& nmList, uint32_t& triLeft, uint32_t& triRight) const
   {
-    if(triLeft == INVALID) {
+    if(triLeft == INVALID)
+    {
       triLeft  = edge.triLeft;
       triRight = edge.triRight;
       nmList   = edge.nmList;
     }
-    else {
+    else
+    {
       triLeft  = INVALID;
       triRight = INVALID;
 
-      if(edge.isNonManifold()) {
+      if(edge.isNonManifold())
+      {
         // find next pairing
-        while(nmList != INVALID) {
+        while(nmList != INVALID)
+        {
           const EdgeNM* edgeNM = iterateEdgeNM(nmList);
-          if(edgeNM->isLeft) {
+          if(edgeNM->isLeft)
+          {
             triLeft  = edgeNM->tri;
             triRight = INVALID;
           }
-          else {
+          else
+          {
             triRight = edgeNM->tri;
           }
 
@@ -1050,62 +1119,62 @@ static const uint32_t EDGE_ANGLE_BIT        = 1 << 4;
 class MeshUtils
 {
 public:
+  static void removeCoplanarTriangle(Mesh& mesh, Loader::BuilderPart& builder, const LdrVector& normal, uint32_t t, uint32_t tOther)
+  {
+    LdrVector normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
+
+    if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT)
+    {
+#if defined(_DEBUG) && LDR_DEBUG_PRINT_NON_MANIFOLDS
+      printf("nonmanifold coplanar: t %d %d - %s\n", t, tOther, builder.filename.c_str());
+#endif
+      if(mesh.triAlive.getBit(t) && (mesh.areTrianglesSame(t, tOther) || builder.isSameQuad(t, tOther)))
+      {
+        mesh.removeTriangle(t);
+      }
+    }
+  }
+
   static void initMesh(Mesh& mesh, Loader::BuilderPart& builder)
   {
     uint32_t numT = builder.triangles.size() / 3;
     uint32_t numV = builder.positions.size();
 
     bool nonManifold = false;
-    for(uint32_t t = 0; t < numT; t++) {
+    for(uint32_t t = 0; t < numT; t++)
+    {
       uint32_t nonManifoldEdge = mesh.addTriangle(t);
 
-      if(nonManifoldEdge != Mesh::INVALID) {
+      if(t == 128)
+        t = t;
+
+      if(nonManifoldEdge != Mesh::INVALID)
+      {
         Mesh::Edge& edge = mesh.edges[nonManifoldEdge];
 
         LdrVector normal = mesh.getTriangleNormal(t, builder.positions.data());
 
-        if(edge.triRight != Mesh::INVALID && edge.triLeft != t) {
-          uint32_t  tOther      = edge.triLeft;
-          LdrVector normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
-          if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
-#if defined(_DEBUG) && LDR_DEBUG_PRINT_NON_MANIFOLDS
-            printf("nonmanifold coplanar: t %d %d - %s\n", t, tOther, builder.filename.c_str());
-#endif
-            if(mesh.areTrianglesSame(t, tOther)) {
-              mesh.removeTriangle(t);
-            }
-          }
+        if(edge.triLeft != t)
+        {
+          removeCoplanarTriangle(mesh, builder, normal, t, edge.triLeft);
         }
 
-        if(edge.triRight != Mesh::INVALID && edge.triRight != t) {
-          uint32_t  tOther      = edge.triRight;
-          LdrVector normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
-          if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
-#if defined(_DEBUG) && LDR_DEBUG_PRINT_NON_MANIFOLDS
-            printf("nonmanifold coplanar: t %d %d - %s\n", t, tOther, builder.filename.c_str());
-#endif
-            if(mesh.triAlive.getBit(t) && mesh.areTrianglesSame(t, tOther)) {
-              mesh.removeTriangle(t);
-            }
-          }
+        if(edge.triRight != Mesh::INVALID && edge.triRight != t)
+        {
+          removeCoplanarTriangle(mesh, builder, normal, t, edge.triRight);
         }
-        if(edge.isNonManifold()) {
+        if(edge.isNonManifold())
+        {
           uint32_t numLeft = 0;
           uint32_t num     = 0;
           uint32_t nextNM  = edge.nmList;
-          while(nextNM != Mesh::INVALID) {
+          while(nextNM != Mesh::INVALID)
+          {
             uint32_t tOther = mesh.iterateEdgeNM(nextNM)->tri;
             num++;
-            if(tOther != t) {
-              LdrVector normalOther = mesh.getTriangleNormal(tOther, builder.positions.data());
-              if(vec_dot(normal, normalOther) > Loader::COPLANAR_TRIANGLE_DOT) {
-#if defined(_DEBUG) && LDR_DEBUG_PRINT_NON_MANIFOLDS
-                printf("nonmanifold coplanar: t %d %d- %s\n", t, tOther, builder.filename.c_str());
-#endif
-                if(mesh.triAlive.getBit(t) && mesh.areTrianglesSame(t, tOther)) {
-                  mesh.removeTriangle(t);
-                }
-              }
+            if(tOther != t)
+            {
+              removeCoplanarTriangle(mesh, builder, normal, t, tOther);
             }
           }
 
@@ -1122,19 +1191,27 @@ public:
 
   static void removeDeleted(Mesh& mesh, Loader::BuilderPart& builder)
   {
+    Loader::TVector<uint32_t> remap(mesh.numTriangles);
+
     uint32_t write = 0;
-    for(uint32_t t = 0; t < mesh.numTriangles; t++) {
-      if(mesh.triAlive.getBit(t)) {
+    for(uint32_t t = 0; t < mesh.numTriangles; t++)
+    {
+      if(mesh.triAlive.getBit(t))
+      {
         builder.triangles[write * 3 + 0] = builder.triangles[t * 3 + 0];
         builder.triangles[write * 3 + 1] = builder.triangles[t * 3 + 1];
         builder.triangles[write * 3 + 2] = builder.triangles[t * 3 + 2];
         builder.materials[write]         = builder.materials[t];
+        remap[t]                         = write;
+        uint32_t quadIndex               = builder.quads[t];
+        builder.quads[write]             = quadIndex != LDR_INVALID_IDX ? remap[quadIndex] : quadIndex;
         write++;
       }
     }
 
     builder.triangles.resize(write * 3);
     builder.materials.resize(write);
+    builder.quads.resize(write);
   }
 
   static void storeEdgeLines(Mesh& mesh, Loader::BuilderPart& builder, bool optional)
@@ -1142,9 +1219,11 @@ public:
     Loader::TVector<LdrVertexIndex>& lines = optional ? builder.optional_lines : builder.lines;
     uint32_t                         flag  = optional ? EDGE_OPTIONAL_BIT : EDGE_HARD_BIT;
 
-    for(uint32_t e = 0; e < mesh.numEdges; e++) {
+    for(uint32_t e = 0; e < mesh.numEdges; e++)
+    {
       const Mesh::Edge& edge = mesh.edges[e];
-      if(!edge.isDead() && edge.flag & flag) {
+      if(!edge.isDead() && edge.flag & flag)
+      {
         lines.push_back(edge.vtxA);
         lines.push_back(edge.vtxB);
       }
@@ -1166,21 +1245,25 @@ public:
 
     Loader::TVector<LdrVertexIndex> newLines;
 
-    for(uint32_t i = 0; i < lines.size() / 2; i++) {
+    for(uint32_t i = 0; i < lines.size() / 2; i++)
+    {
       uint32_t lineA = lines[i * 2 + 0];
       uint32_t lineB = lines[i * 2 + 1];
 
       Mesh::Edge* edgeFound = mesh.getEdge(lineA, lineB);
-      if(edgeFound) {
+      if(edgeFound)
+      {
         edgeFound->flag |= flag;
       }
-      else {
+      else
+      {
         // floating edges (no triangles) are ugly, try to find path between them
         // once from both directions in case there is t-junction
 
         uint32_t foundConnections = 0;
 
-        for(int side = 0; side < 2; side++) {
+        for(int side = 0; side < 2; side++)
+        {
           uint32_t vStart = side ? lineA : lineB;
           uint32_t vEnd   = side ? lineB : lineA;
 
@@ -1194,28 +1277,32 @@ public:
           uint32_t v       = vStart;
           uint32_t numPath = 0;
 
-          while(v != vEnd && v != LDR_INVALID_IDX) {
+          while(v != vEnd && v != LDR_INVALID_IDX)
+          {
             float    maxDot      = 0.90f;
             uint32_t closestEdge = LDR_INVALID_IDX;
             uint32_t vNext       = LDR_INVALID_IDX;
 
             // find closest
             uint32_t vtests[1] = {v};
-            for(uint32_t t = 0; t < 1; t++) {
+            for(uint32_t t = 0; t < 1; t++)
+            {
               uint32_t vtest = vtests[t];
               if(vtest == LDR_INVALID_IDX)
                 continue;
 
               uint32_t        edgeCount;
               const uint32_t* edgeIndices = mesh.vtxEdges.getConnected(vtest, edgeCount);
-              for(uint32_t e = 0; e < edgeCount; e++) {
+              for(uint32_t e = 0; e < edgeCount; e++)
+              {
                 const Mesh::Edge& edge = mesh.edges[edgeIndices[e]];
                 assert(!edge.isDead());
                 uint32_t  vOther = edge.otherVertex(vtest);
                 LdrVector vecCur = vec_normalize(vec_sub(builder.positions[vOther], builder.positions[vtest]));
                 float     dist   = vec_sq_length(vec_sub(builder.positions[vOther], builder.positions[vEnd]));
                 float     dot    = vec_dot(vecCur, vecEdge);
-                if(dot > maxDot && dist < minDist) {
+                if(dot > maxDot && dist < minDist)
+                {
                   maxDot      = dot;
                   vNext       = vOther;
                   closestEdge = edgeIndices[e];
@@ -1228,15 +1315,18 @@ public:
             numPath++;
           }
 
-          if(v == vEnd) {
-            for(uint32_t p = 0; p < numPath; p++) {
+          if(v == vEnd)
+          {
+            for(uint32_t p = 0; p < numPath; p++)
+            {
               mesh.edges[path[p]].flag |= flag;
             }
             foundConnections++;
           }
         }
 
-        if(foundConnections != 2) {
+        if(foundConnections != 2)
+        {
           newLines.push_back(lineA);
           newLines.push_back(lineB);
         }
@@ -1257,14 +1347,16 @@ public:
 
     Loader::BitArray processed(mesh.edges.size(), false);
 
-    for(uint32_t v = 0; v < numVertices; v++) {
+    for(uint32_t v = 0; v < numVertices; v++)
+    {
       bool     respin = false;
       uint32_t edgeCountA;
       mesh.vtxEdges.getConnected(v, edgeCountA);
 
       bool isOpenCorner = mesh.getVertexClosable(v) && edgeCountA == 2;
 
-      for(uint32_t ea = 0; ea < edgeCountA; ea++) {
+      for(uint32_t ea = 0; ea < edgeCountA; ea++)
+      {
         // must get pointer inside loop, given we modify the mesh when creating new triangles
         const uint32_t* edgeIndices = mesh.vtxEdges.getConnected(v, edgeCountA);
 
@@ -1293,13 +1385,15 @@ public:
         bool     singleTriangle = true;
 
         // find closest edges
-        while(edgeNext != Mesh::INVALID) {
+        while(edgeNext != Mesh::INVALID)
+        {
           uint32_t        edgeCountC;
           const uint32_t* edgeIndicesC = mesh.vtxEdges.getConnected(vNext, edgeCountC);
           float           maxDot       = 0.98f;
           uint32_t        idx          = Mesh::INVALID;
 
-          for(uint32_t ec = 0; ec < edgeCountC; ec++) {
+          for(uint32_t ec = 0; ec < edgeCountC; ec++)
+          {
             uint32_t          edgeIdxC = edgeIndicesC[ec];
             const Mesh::Edge& edgeC    = mesh.edges[edgeIndicesC[ec]];
 
@@ -1311,7 +1405,8 @@ public:
             float     lengthC;
             LdrVector vecC  = vec_normalize_length(vec_sub(builder.positions[vC], posA), lengthC);
             float     dotAC = vec_dot(vecA, vecC);
-            if((lengthC <= lengthA * 1.05f && dotAC > maxDot) || vC == vEnd) {
+            if((lengthC <= lengthA * 1.05f && dotAC > maxDot) || vC == vEnd)
+            {
               maxDot = dotAC;
               idx    = edgeIdxC;
             }
@@ -1319,13 +1414,15 @@ public:
           edgeNext    = idx;
           edgeIdxSkip = edgeNext;
 
-          if(edgeNext != Mesh::INVALID) {
+          if(edgeNext != Mesh::INVALID)
+          {
             path.push_back(edgeNext);
             vNext = mesh.edges[edgeNext].otherVertex(vNext);
 
             singleTriangle = singleTriangle && mesh.edges[edgeNext].triLeft == triOld;
 
-            if(vNext == vEnd || path.size() == 128) {
+            if(vNext == vEnd || path.size() == 128)
+            {
               break;
             }
           }
@@ -1335,9 +1432,11 @@ public:
           continue;
 
         // special case close triangle holes
-        if(isOpenCorner) {
+        if(isOpenCorner)
+        {
           uint32_t vPrev = mesh.edges[edgeNext].otherVertex(vNext);
-          if(mesh.getVertexClosable(vPrev)) {
+          if(mesh.getVertexClosable(vPrev))
+          {
             uint32_t triOld = edgeA.triLeft;
             mesh.removeTriangle(triOld);
             mesh.replaceTriangleVertex(triOld, v, vPrev);
@@ -1350,7 +1449,8 @@ public:
             continue;
           }
         }
-        if(singleTriangle) {
+        if(singleTriangle)
+        {
           continue;
         }
 
@@ -1365,19 +1465,23 @@ public:
 
         uint32_t subEdge = 0;
         uint32_t vCorner = 0;
-        if(triIndices[0] == edgeA.vtxA) {
+        if(triIndices[0] == edgeA.vtxA)
+        {
           subEdge = 0;
           vCorner = triIndices[2];
         }
-        else if(triIndices[1] == edgeA.vtxA) {
+        else if(triIndices[1] == edgeA.vtxA)
+        {
           subEdge = 1;
           vCorner = triIndices[0];
         }
-        else if(triIndices[2] == edgeA.vtxA) {
+        else if(triIndices[2] == edgeA.vtxA)
+        {
           subEdge = 2;
           vCorner = triIndices[1];
         }
-        else {
+        else
+        {
           assert(0);
         }
 
@@ -1388,7 +1492,8 @@ public:
         mesh.removeTriangle(triOld);
 
         uint32_t quadOld = builder.quads[triOld];
-        if(quadOld != LDR_INVALID_IDX) {
+        if(quadOld != LDR_INVALID_IDX)
+        {
           builder.quads[quadOld] = LDR_INVALID_IDX;
           builder.quads[triOld]  = LDR_INVALID_IDX;
         }
@@ -1410,7 +1515,8 @@ public:
         uint32_t flagPath = edgeA.flag;
         uint32_t vFirst   = edgeA.vtxA;
 
-        for(size_t i = 0; i < path.size(); i++) {
+        for(size_t i = 0; i < path.size(); i++)
+        {
           uint32_t    edgeIdxC = path[i];
           Mesh::Edge& edgeC    = mesh.edges[edgeIdxC];
           processed.setBit(edgeIdxC, true);
@@ -1420,7 +1526,8 @@ public:
           // make new triangles, first re-uses old slot
 
           uint32_t triIdx;
-          if(i != 0) {
+          if(i != 0)
+          {
             triIdx = uint32_t(builder.triangles.size() / 3);
             builder.triangles.push_back(vFirst);
             builder.triangles.push_back(edgeC.otherVertex(vFirst));
@@ -1428,7 +1535,8 @@ public:
             builder.materials.push_back(builder.materials[triOld]);
             builder.quads.push_back(LDR_INVALID_IDX);
           }
-          else {
+          else
+          {
             triIdx                            = triOld;
             builder.triangles[triOld * 3 + 0] = vFirst;
             builder.triangles[triOld * 3 + 1] = edgeC.otherVertex(vFirst);
@@ -1438,7 +1546,8 @@ public:
           mesh.triangles = builder.triangles.data();
 
           uint32_t nonManifold = mesh.addTriangle(triIdx);
-          if(nonManifold != Mesh::INVALID) {
+          if(nonManifold != Mesh::INVALID)
+          {
             //builder.flag.canChamfer = 0;
           }
 
@@ -1456,7 +1565,8 @@ public:
         processed.resize(mesh.edges.size(), false);
         respin = true;
       }
-      if(respin) {
+      if(respin)
+      {
         v = v - 1;
       }
     }
@@ -1475,7 +1585,8 @@ public:
 
     MeshUtils::initLines(mesh, builder, false);
     MeshUtils::initLines(mesh, builder, true);
-    if(config.partFixTjunctions) {
+    if(config.partFixTjunctions)
+    {
       MeshUtils::fixTjunctions(mesh, builder);
     }
     MeshUtils::storeEdgeLines(mesh, builder, false);
@@ -1492,7 +1603,8 @@ public:
 
     bool hasMaterials = !builder.materialsC.empty();
 
-    if(hasMaterials) {
+    if(hasMaterials)
+    {
       memcpy(builder.materialsC.data(), part.materials, sizeof(LdrMaterialID) * part.num_triangles);
     }
 
@@ -1505,10 +1617,12 @@ public:
     // store where the chamfered begin
     Loader::TVector<uint32_t> vtxChamferBegin(part.num_positions, 0);
 
-    for(uint32_t v = 0; v < part.num_positions; v++) {
+    for(uint32_t v = 0; v < part.num_positions; v++)
+    {
       Loader::BuilderRenderPart::VertexInfo outInfo  = builder.vtxOutInfo[v];
       uint32_t                              outCount = outInfo.count;
-      if(outCount > 1) {
+      if(outCount > 1)
+      {
 
         vtxChamferBegin[v] = (uint32_t)builder.vertices.size();
 
@@ -1521,7 +1635,8 @@ public:
         LdrVector avgNormal = {0, 0, 0};
         LdrVector avgPos    = {0, 0, 0};
 
-        for(uint32_t e = 0; e < edgeCount; e++) {
+        for(uint32_t e = 0; e < edgeCount; e++)
+        {
           const MeshFull::Edge edge = mesh.edges[edgeIndices[e]];
           dist = std::min(dist, vec_sq_length(vec_sub(part.positions[edge.vtxA], part.positions[edge.vtxB])));
         }
@@ -1530,7 +1645,8 @@ public:
         uint32_t materialTri;
 
         // create new output vertex that is chamfered
-        for(uint32_t o = 0; o < outCount; o++) {
+        for(uint32_t o = 0; o < outCount; o++)
+        {
           uint32_t outIdx = builder.vtxOutIndices[outInfo.begin + o];
 
           LdrVector normal = builder.vertices[outIdx].normal;
@@ -1572,7 +1688,8 @@ public:
           LdrVector vecBA = vec_sub(part.positions[edgeB.otherVertex(v)], part.positions[v]);
 
           // may need to reverse vectors to makes sure edge BC is "against" triangle winding.
-          if(!((edgeA.vtxB == v && edgeA.triLeft == edgePair.tri[0]) || (edgeA.vtxA == v && edgeA.triRight == edgePair.tri[0]))) {
+          if(!((edgeA.vtxB == v && edgeA.triLeft == edgePair.tri[0]) || (edgeA.vtxA == v && edgeA.triRight == edgePair.tri[0])))
+          {
             LdrVector temp = vecBC;
             vecBC          = vecBA;
             vecBA          = temp;
@@ -1590,20 +1707,24 @@ public:
           bool  isSame          = vec_dot(vecBA, vecBC) > Loader::CHAMFER_PARALLEL_DOT;
 
           LdrVector shift;
-          if(isSame) {
+          if(isSame)
+          {
             chamferModifier = 0;
             shift           = {0, 0, 0};
           }
-          else if(isOpposite) {
+          else if(isOpposite)
+          {
             shift = vec_normalize(vec_cross(vecBC, normal));
           }
-          else {
+          else
+          {
             shift = vec_normalize(vec_add(vecBA, vecBC));
             // may need to flip side
             float chamferSign = vec_dot(vec_cross(vecBA, vecBC), normal) < 0 ? -1.0f : 1.0f;
 
             float h = 1.0f / sinf(acosf(vec_dot(vecBA, vecBC)) * 0.5f);
-            if(h > 10.0f) {
+            if(h > 10.0f)
+            {
               h = 0;
             }
 
@@ -1611,13 +1732,15 @@ public:
           }
 
           // just in case things go beyound south
-          if(isnan(chamferModifier) || isinf(chamferModifier) || (edgeA.isOpen() && edgeB.isOpen())) {
+          if(isnan(chamferModifier) || isinf(chamferModifier) || (edgeA.isOpen() && edgeB.isOpen()))
+          {
             chamferModifier = 0;
           }
 
           LdrVector vecDelta = vec_mul(shift, (chamferDistance * chamferModifier));
 
-          if(edgeA.isOpen() || edgeB.isOpen()) {
+          if(edgeA.isOpen() || edgeB.isOpen())
+          {
             uint32_t  vOther  = edgeA.isOpen() ? edgeA.otherVertex(v) : edgeB.otherVertex(v);
             LdrVector vecOpen = vec_normalize(vec_sub(part.positions[vOther], part.positions[v]));
             vecDelta          = vec_mul(vecOpen, vec_dot(vecOpen, vecDelta));
@@ -1636,7 +1759,8 @@ public:
           uint32_t        triCount;
           const uint32_t* triIndices = mesh.vtxTriangles.getConnected(v, triCount);
 
-          for(uint32_t t = 0; t < triCount; t++) {
+          for(uint32_t t = 0; t < triCount; t++)
+          {
             const uint32_t  triBegin = triIndices[t] * 3;
             const uint32_t* indices  = &renderTriangles[triBegin];
             if(indices[0] == outIdx)
@@ -1650,12 +1774,15 @@ public:
 
         uint32_t groupStart  = 0;
         uint32_t groupLength = 0;
-        for(uint32_t g = 0; g < outInfo.groupCount; g++) {
+        for(uint32_t g = 0; g < outInfo.groupCount; g++)
+        {
 
           groupLength = 0;
-          for(uint32_t og = groupStart; og < outInfo.count; og++) {
+          for(uint32_t og = groupStart; og < outInfo.count; og++)
+          {
             const Loader::BuilderRenderPart::EdgePair& pair = builder.vtxOutEdgePairs[outInfo.begin + og];
-            if(pair.group != g) {
+            if(pair.group != g)
+            {
               break;
             }
             groupLength++;
@@ -1671,12 +1798,14 @@ public:
 
           uint32_t outTriangleCount = groupLength > 4 ? groupLength : (groupLength > 2 ? groupLength - 2 : 0);
           uint32_t lastIndex        = builder.vertices.size();
-          if(outTriangleCount > 2) {
+          if(outTriangleCount > 2)
+          {
             avgNormal = vec_normalize(avgNormal);
             builder.vertices.push_back({vec_mul(avgPos, 1.0f / float(groupLength)), 0, avgNormal});
           }
 
-          for(uint32_t t = 0; t < outTriangleCount; t++) {
+          for(uint32_t t = 0; t < outTriangleCount; t++)
+          {
             uint32_t a = vtxChamferBegin[v] + groupStart + t + 0;
             uint32_t b = vtxChamferBegin[v] + groupStart + (t + 1) % groupLength;
             uint32_t c = outTriangleCount > 2 ? lastIndex : vtxChamferBegin[v] + groupStart + t + 2;
@@ -1684,18 +1813,21 @@ public:
             LdrVector normal = vec_cross(vec_sub(builder.vertices[b].position, builder.vertices[a].position),
                                          vec_sub(builder.vertices[c].position, builder.vertices[a].position));
 
-            if(vec_dot(normal, avgNormal) < 0) {
+            if(vec_dot(normal, avgNormal) < 0)
+            {
               builder.trianglesC.push_back(c);
               builder.trianglesC.push_back(b);
               builder.trianglesC.push_back(a);
             }
-            else {
+            else
+            {
               builder.trianglesC.push_back(a);
               builder.trianglesC.push_back(b);
               builder.trianglesC.push_back(c);
             }
 
-            if(hasMaterials) {
+            if(hasMaterials)
+            {
               builder.materialsC.push_back(part.materials[materialTri]);
             }
           }
@@ -1706,7 +1838,8 @@ public:
     }
 
     // second pass is to create new triangles for every hard edge
-    for(uint32_t e = 0; e < mesh.numEdges; e++) {
+    for(uint32_t e = 0; e < mesh.numEdges; e++)
+    {
       const MeshFull::Edge& edge = mesh.edges[e];
 
       if(edge.isOpen() || !(edge.flag & (EDGE_ANGLE_BIT | EDGE_HARD_BIT)))
@@ -1716,7 +1849,8 @@ public:
       uint32_t triRight = MeshFull::INVALID;
       uint32_t nmList   = MeshFull::INVALID;
 
-      while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight)) {
+      while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight))
+      {
 
         // split edge exists if
         // - we have an edge between the two original triangles
@@ -1729,13 +1863,16 @@ public:
         auto findChamferVertex = [&](uint32_t v, uint32_t tri) {
           Loader::BuilderRenderPart::VertexInfo outInfo  = builder.vtxOutInfo[v];
           uint32_t                              outCount = outInfo.count;
-          for(uint32_t o = 0; o < outCount; o++) {
+          for(uint32_t o = 0; o < outCount; o++)
+          {
             uint32_t                                   outIdx   = builder.vtxOutIndices[outInfo.begin + o];
             const Loader::BuilderRenderPart::EdgePair& edgePair = builder.vtxOutEdgePairs[outInfo.begin + o];
-            if(edgePair.edge[0] == e && edgePair.tri[0] == tri) {
+            if(edgePair.edge[0] == e && edgePair.tri[0] == tri)
+            {
               return vtxChamferBegin[v] + o;
             }
-            if(edgePair.edge[1] == e && edgePair.tri[1] == tri) {
+            if(edgePair.edge[1] == e && edgePair.tri[1] == tri)
+            {
               return vtxChamferBegin[v] + o;
             }
           }
@@ -1755,7 +1892,8 @@ public:
             {idxRightA, idxRightB, idxLeftA},
         };
 
-        for(uint32_t t = 0; t < 2; t++) {
+        for(uint32_t t = 0; t < 2; t++)
+        {
           uint32_t a = triangles[t][0];
           uint32_t b = triangles[t][1];
           uint32_t c = triangles[t][2];
@@ -1763,7 +1901,8 @@ public:
           if(a == b || a == c || b == c)
             continue;
 
-          if(hasMaterials) {
+          if(hasMaterials)
+          {
             builder.materialsC.push_back(part.materials[triLeft]);
           }
           builder.trianglesC.push_back(a);
@@ -1800,8 +1939,10 @@ public:
 
     uint32_t* triangleVertices = builder.triangles.data();
 
-    for(uint32_t t = 0; t < mesh.numTriangles; t++) {
-      for(uint32_t k = 0; k < 3; k++) {
+    for(uint32_t t = 0; t < mesh.numTriangles; t++)
+    {
+      for(uint32_t k = 0; k < 3; k++)
+      {
         triangleVertices[t * 3 + k]          = t * 3 + k;
         builder.vertices[t * 3 + k].position = part.positions[mesh.triangles[t * 3 + k]];
         builder.vertices[t * 3 + k].normal   = builder.triNormals[t];
@@ -1813,7 +1954,8 @@ public:
     bool checkMaterials = part.materials && config.renderpartVertexMaterials;
 
     // first is a vertex merge pass over all compatible edges
-    for(uint32_t e = 0; e < mesh.numEdges; e++) {
+    for(uint32_t e = 0; e < mesh.numEdges; e++)
+    {
 
       MeshFull::Edge& edge = mesh.edges[e];
 
@@ -1824,7 +1966,8 @@ public:
       uint32_t triRight = MeshFull::INVALID;
       uint32_t nmList   = MeshFull::INVALID;
 
-      while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight)) {
+      while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight))
+      {
 
         uint32_t leftOrigA = mesh.findTriangleVertex(triLeft, edge.vtxA);
         uint32_t leftOrigB = mesh.findTriangleVertex(triLeft, edge.vtxB);
@@ -1842,11 +1985,13 @@ public:
 
         bool canMergeAngle = vec_dot(builder.triNormals[triLeft], builder.triNormals[triRight]) >= Loader::FORCED_HARD_EDGE_DOT;
 
-        if(!canMergeAngle) {
+        if(!canMergeAngle)
+        {
           edge.flag |= EDGE_ANGLE_BIT;
         }
 
-        if(canMergeMaterial && canMergeAngle) {
+        if(canMergeMaterial && canMergeAngle)
+        {
 
           uint32_t leftA = triLeft * 3 + leftOrigA;
           uint32_t leftB = triLeft * 3 + leftOrigB;
@@ -1866,12 +2011,14 @@ public:
 
           // if right is already connected, we need to propagate its connections to point to left
           // triangle vertices now
-          for(uint32_t s = 0; s < 2; s++) {
+          for(uint32_t s = 0; s < 2; s++)
+          {
             uint32_t tri      = triRight;
             uint32_t rvtx     = s == 0 ? triangleVertices[leftA] : triangleVertices[leftB];
             uint32_t vtx      = s == 0 ? edge.vtxA : edge.vtxB;
             bool     outgoing = s == 0;
-            while(tri != LDR_INVALID_IDX) {
+            while(tri != LDR_INVALID_IDX)
+            {
               uint32_t triVtx = mesh.findTriangleVertex(tri, vtx);
 
               uint32_t triEdge                   = outgoing ? triVtx : (3 + triVtx - 1) % 3;
@@ -1894,8 +2041,10 @@ public:
     }
 
     // second pass, we must merge normals along edges that were split only due to material
-    if(checkMaterials) {
-      for(uint32_t e = 0; e < mesh.numEdges; e++) {
+    if(checkMaterials)
+    {
+      for(uint32_t e = 0; e < mesh.numEdges; e++)
+      {
 
         const MeshFull::Edge& edge = mesh.edges[e];
 
@@ -1906,12 +2055,14 @@ public:
         uint32_t triRight = MeshFull::INVALID;
         uint32_t nmList   = MeshFull::INVALID;
 
-        while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight)) {
+        while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight))
+        {
 
           bool canMergeMaterial = part.materials[triLeft] == part.materials[triLeft];
           bool canMergeAngle = vec_dot(builder.triNormals[triLeft], builder.triNormals[triRight]) >= Loader::FORCED_HARD_EDGE_DOT;
 
-          if(!canMergeMaterial && !canMergeAngle) {
+          if(!canMergeMaterial && !canMergeAngle)
+          {
 
             uint32_t leftOrigA = mesh.findTriangleVertex(triLeft, edge.vtxA);
             uint32_t leftOrigB = mesh.findTriangleVertex(triLeft, edge.vtxB);
@@ -1945,8 +2096,10 @@ public:
     Loader::TVector<uint32_t> remapCompact(builder.triangles.size(), LDR_INVALID_IDX);
 
     uint32_t numVerticesNew = 0;
-    for(uint32_t i = 0; i < builder.triangles.size(); i++) {
-      if(builder.triangles[i] == i) {
+    for(uint32_t i = 0; i < builder.triangles.size(); i++)
+    {
+      if(builder.triangles[i] == i)
+      {
         remapCompact[i] = numVerticesNew++;
       }
     }
@@ -1958,8 +2111,10 @@ public:
     Loader::TVector<uint32_t> vtxFirstRenderVertex(part.num_positions, LDR_INVALID_IDX);
     Loader::TVector<uint32_t> renderVtxFirstTriangle(numVerticesNew, LDR_INVALID_IDX);
 
-    for(uint32_t i = 0; i < builder.vertices.size(); i++) {
-      if(remapCompact[i] != LDR_INVALID_IDX) {
+    for(uint32_t i = 0; i < builder.vertices.size(); i++)
+    {
+      if(remapCompact[i] != LDR_INVALID_IDX)
+      {
         uint32_t v          = remapCompact[i];
         builder.vertices[v] = builder.vertices[i];
 
@@ -1980,22 +2135,26 @@ public:
     }
 
 
-    if(config.renderpartChamfer) {
+    if(config.renderpartChamfer)
+    {
       builder.vtxOutInfo.resize(part.num_positions);
       builder.vtxOutIndices.resize(numVerticesNew);
       builder.vtxOutEdgePairs.resize(numVerticesNew);
 
       uint32_t base        = 0;
       uint32_t maxOutCount = 0;
-      for(uint32_t i = 0; i < part.num_positions; i++) {
+      for(uint32_t i = 0; i < part.num_positions; i++)
+      {
         builder.vtxOutInfo[i].begin = base;
         maxOutCount                 = std::max(maxOutCount, builder.vtxOutInfo[i].count);
         base += builder.vtxOutInfo[i].count;
         builder.vtxOutInfo[i].count = 0;
       }
 
-      for(uint32_t i = 0; i < builder.vertices.size(); i++) {
-        if(remapCompact[i] != LDR_INVALID_IDX) {
+      for(uint32_t i = 0; i < builder.vertices.size(); i++)
+      {
+        if(remapCompact[i] != LDR_INVALID_IDX)
+        {
           uint32_t origVertex = part.triangles[i];
           uint32_t v          = remapCompact[i];
           builder.vtxOutIndices[builder.vtxOutInfo[origVertex].begin + (builder.vtxOutInfo[origVertex].count++)] = v;
@@ -2006,19 +2165,22 @@ public:
       Loader::TVector<uint32_t>                            localVertices(maxOutCount, 0);
       Loader::TVector<Loader::BuilderRenderPart::EdgePair> localPairs(maxOutCount);
 
-      for(uint32_t i = 0; i < part.num_positions; i++) {
+      for(uint32_t i = 0; i < part.num_positions; i++)
+      {
         Loader::BuilderRenderPart::VertexInfo& outInfo = builder.vtxOutInfo[i];
 
         if(outInfo.count < 2)
           continue;
 
-        if(i == 182) {
+        if(i == 182)
+        {
           i = i;
         }
 
         memset(localOutIdx.data(), LDR_INVALID_IDX, maxOutCount * sizeof(uint32_t));
 
-        for(uint32_t o = 0; o < outInfo.count; o++) {
+        for(uint32_t o = 0; o < outInfo.count; o++)
+        {
           uint32_t rvtx = builder.vtxOutIndices[outInfo.begin + o];
 
           localVertices[o] = rvtx;
@@ -2034,10 +2196,12 @@ public:
           uint32_t pairTriEdge[2] = {LDR_INVALID_IDX, LDR_INVALID_IDX};
 
           // check both side edges
-          for(uint32_t s = 0; s < 2; s++) {
+          for(uint32_t s = 0; s < 2; s++)
+          {
             uint32_t tri      = firstTri;
             bool     outgoing = s == 0;
-            while(tri != LDR_INVALID_IDX) {
+            while(tri != LDR_INVALID_IDX)
+            {
               uint32_t triVtx = mesh.findTriangleVertex(tri, i);
 
               uint32_t triEdge = outgoing ? triVtx : (3 + triVtx - 1) % 3;
@@ -2053,25 +2217,29 @@ public:
             }
           }
 
-          for(uint32_t s = 0; s < 2; s++) {
+          for(uint32_t s = 0; s < 2; s++)
+          {
             const uint32_t* vertices = mesh.getTriangle(pair.tri[s]);
             pair.edge[s]             = mesh.getEdgeIdx(vertices[pairTriEdge[s]], vertices[(pairTriEdge[s] + 1) % 3]);
           }
 
-          for(uint32_t p = 0; p < o; p++) {
+          for(uint32_t p = 0; p < o; p++)
+          {
             Loader::BuilderRenderPart::EdgePair& ppair = localPairs[p];
 
             // connect pairs with other pairs
 
             if((ppair.edge[0] == pair.edge[0] || ppair.edge[1] == pair.edge[0])
-               && mesh.areTriManifoldAdjacent(pair.tri[0], ppair.edge[0] == pair.edge[0] ? ppair.tri[0] : ppair.tri[1])) {
+               && mesh.areTriManifoldAdjacent(pair.tri[0], ppair.edge[0] == pair.edge[0] ? ppair.tri[0] : ppair.tri[1]))
+            {
 
               pair.pairs[0]                                      = p;
               ppair.pairs[ppair.edge[0] == pair.edge[0] ? 0 : 1] = o;
             }
 
             if((ppair.edge[0] == pair.edge[1] || ppair.edge[1] == pair.edge[1])
-               && mesh.areTriManifoldAdjacent(pair.tri[1], ppair.edge[0] == pair.edge[1] ? ppair.tri[0] : ppair.tri[1])) {
+               && mesh.areTriManifoldAdjacent(pair.tri[1], ppair.edge[0] == pair.edge[1] ? ppair.tri[0] : ppair.tri[1]))
+            {
 
               pair.pairs[1]                                      = p;
               ppair.pairs[ppair.edge[0] == pair.edge[1] ? 0 : 1] = o;
@@ -2083,26 +2251,32 @@ public:
 
         uint32_t newOutCount = 0;
 
-        for(uint32_t s = 0; s < 2; s++) {
+        for(uint32_t s = 0; s < 2; s++)
+        {
           // first pass is find those that are not dual connected.
           // otherwise can start at any
 
-          for(uint32_t o = 0; o < outInfo.count; o++) {
+          for(uint32_t o = 0; o < outInfo.count; o++)
+          {
             if(localOutIdx[o] == LDR_INVALID_IDX
-               && ((s == 0 && localPairs[o].pairs[0] == LDR_INVALID_IDX || localPairs[o].pairs[1] == LDR_INVALID_IDX) || s)) {
+               && ((s == 0 && localPairs[o].pairs[0] == LDR_INVALID_IDX || localPairs[o].pairs[1] == LDR_INVALID_IDX) || s))
+            {
               // walk onesided
               localOutIdx[o]      = newOutCount++;
               localPairs[o].group = outInfo.groupCount;
 
               uint32_t prev = o;
               uint32_t next = localPairs[o].pairs[0] == LDR_INVALID_IDX ? localPairs[o].pairs[1] : localPairs[o].pairs[0];
-              while(next != LDR_INVALID_IDX) {
+              while(next != LDR_INVALID_IDX)
+              {
                 //assert(localOutIdx[next] == LDR_INVALID_IDX);
-                if(localOutIdx[next] == LDR_INVALID_IDX) {
+                if(localOutIdx[next] == LDR_INVALID_IDX)
+                {
                   localPairs[next].group = outInfo.groupCount;
                   localOutIdx[next]      = newOutCount++;
                 }
-                else {
+                else
+                {
                   // TODO fixme, should not get here
                   break;
                 }
@@ -2119,15 +2293,18 @@ public:
           }
         }
 
-        for(uint32_t o = 0; o < outInfo.count; o++) {
-          if(localOutIdx[o] == LDR_INVALID_IDX) {
+        for(uint32_t o = 0; o < outInfo.count; o++)
+        {
+          if(localOutIdx[o] == LDR_INVALID_IDX)
+          {
             localPairs[o].group = outInfo.groupCount++;
             localOutIdx[o]      = newOutCount++;
           }
         }
 
         // output re-ordered
-        for(uint32_t o = 0; o < outInfo.count; o++) {
+        for(uint32_t o = 0; o < outInfo.count; o++)
+        {
           uint32_t oIdx                                 = localOutIdx[o];
           builder.vtxOutIndices[outInfo.begin + oIdx]   = localVertices[o];
           builder.vtxOutEdgePairs[outInfo.begin + oIdx] = localPairs[o];
@@ -2137,20 +2314,23 @@ public:
 
     builder.vertices.resize(numVerticesNew);
 
-    for(uint32_t i = 0; i < part.num_lines; i++) {
+    for(uint32_t i = 0; i < part.num_lines; i++)
+    {
       uint32_t vertexA = part.lines[i * 2 + 0];
       uint32_t vertexB = part.lines[i * 2 + 1];
 
       uint32_t renderVertexA = vtxFirstRenderVertex[vertexA];
 
-      if(renderVertexA == LDR_INVALID_IDX) {
+      if(renderVertexA == LDR_INVALID_IDX)
+      {
         renderVertexA                 = builder.vertices.size();
         vtxFirstRenderVertex[vertexA] = renderVertexA;
         builder.vertices.push_back(make_vertex(part.positions[vertexA]));
       }
 
       uint32_t renderVertexB = vtxFirstRenderVertex[vertexB];
-      if(renderVertexB == LDR_INVALID_IDX) {
+      if(renderVertexB == LDR_INVALID_IDX)
+      {
         renderVertexB                 = builder.vertices.size();
         vtxFirstRenderVertex[vertexB] = renderVertexB;
         builder.vertices.push_back(make_vertex(part.positions[vertexB]));
@@ -2175,21 +2355,25 @@ public:
 
     builder.triNormals.reserve(part.num_triangles);
 
-    for(uint32_t t = 0; t < part.num_triangles; t++) {
+    for(uint32_t t = 0; t < part.num_triangles; t++)
+    {
       builder.triNormals.push_back(mesh.getTriangleNormal(t, part.positions));
     }
 
     // push "hard" lines
-    for(uint32_t i = 0; i < part.num_lines; i++) {
+    for(uint32_t i = 0; i < part.num_lines; i++)
+    {
       MeshFull::Edge* edge = mesh.getEdge(part.lines[i * 2 + 0], part.lines[i * 2 + 1]);
-      if(edge) {
+      if(edge)
+      {
         edge->flag |= EDGE_HARD_BIT;
       }
     }
 
     buildRenderPartBasic(builder, mesh, part, config);
 
-    if(config.renderpartChamfer) {
+    if(config.renderpartChamfer)
+    {
       chamferRenderPart(mesh, builder, part, config.renderpartChamfer);
     }
   }
@@ -2222,7 +2406,8 @@ LdrResult Loader::init(const LdrLoaderCreateInfo* createInfo)
 
   *pCfg                   = *createInfo;
   m_config.basePathString = createInfo->basePath;
-  if(createInfo->cacheFile) {
+  if(createInfo->cacheFile)
+  {
     m_config.cachFileString = createInfo->cacheFile;
   }
   m_config.basePath  = nullptr;
@@ -2257,43 +2442,55 @@ LdrResult Loader::init(const LdrLoaderCreateInfo* createInfo)
 
   LdrMaterialType type = LDR_MATERIAL_SOLID;
 
-  if(txt.load((m_config.basePathString + "/LDConfig.ldr").c_str())) {
+  if(txt.load((m_config.basePathString + "/LDConfig.ldr").c_str()))
+  {
     char* line = txt.buffer;
-    for(size_t i = 0; i < txt.size; i++) {
+    for(size_t i = 0; i < txt.size; i++)
+    {
       if(txt.buffer[i] == '\r')
         txt.buffer[i] = '\n';
       if(txt.buffer[i] != '\n')
         continue;
       txt.buffer[i] = 0;
 
-      if(strstr(line, "0 // LDraw Solid Colours")) {
+      if(strstr(line, "0 // LDraw Solid Colours"))
+      {
         type = LDR_MATERIAL_SOLID;
       }
-      else if(strstr(line, "0 // LDraw Transparent Colours")) {
+      else if(strstr(line, "0 // LDraw Transparent Colours"))
+      {
         type = LDR_MATERIAL_TRANSPARENT;
       }
-      else if(strstr(line, "0 // LDraw Chrome Colours")) {
+      else if(strstr(line, "0 // LDraw Chrome Colours"))
+      {
         type = LDR_MATERIAL_CHROME;
       }
-      else if(strstr(line, "0 // LDraw Pearl Colours")) {
+      else if(strstr(line, "0 // LDraw Pearl Colours"))
+      {
         type = LDR_MATERIAL_PEARL;
       }
-      else if(strstr(line, "0 // LDraw Metallic Colours")) {
+      else if(strstr(line, "0 // LDraw Metallic Colours"))
+      {
         type = LDR_MATERIAL_METALLIC;
       }
-      else if(strstr(line, "0 // LDraw Milky Colours")) {
+      else if(strstr(line, "0 // LDraw Milky Colours"))
+      {
         type = LDR_MATERIAL_MILKY;
       }
-      else if(strstr(line, "0 // LDraw Glitter Colours")) {
+      else if(strstr(line, "0 // LDraw Glitter Colours"))
+      {
         type = LDR_MATERIAL_GLITTER;
       }
-      else if(strstr(line, "0 // LDraw Speckle Colours")) {
+      else if(strstr(line, "0 // LDraw Speckle Colours"))
+      {
         type = LDR_MATERIAL_SPECKLE;
       }
-      else if(strstr(line, "0 // LDraw Rubber Colours")) {
+      else if(strstr(line, "0 // LDraw Rubber Colours"))
+      {
         type = LDR_MATERIAL_RUBBER;
       }
-      else if(strstr(line, "0 // LDraw Internal Common Material Colours")) {
+      else if(strstr(line, "0 // LDraw Internal Common Material Colours"))
+      {
         type = LDR_MATERIAL_COMMON;
       }
 
@@ -2302,7 +2499,8 @@ LdrResult Loader::init(const LdrLoaderCreateInfo* createInfo)
       uint32_t code        = 0;
       uint32_t value       = 0;
       uint32_t edge        = 0;
-      if(4 == sscanf(line, "0 !COLOUR %47s CODE %d VALUE #%X EDGE #%X", material.name, &code, &value, &edge)) {
+      if(4 == sscanf(line, "0 !COLOUR %47s CODE %d VALUE #%X EDGE #%X", material.name, &code, &value, &edge))
+      {
         material.baseColor[2] = (value >> 0) & 0xFF;
         material.baseColor[1] = (value >> 8) & 0xFF;
         material.baseColor[0] = (value >> 16) & 0xFF;
@@ -2315,18 +2513,21 @@ LdrResult Loader::init(const LdrLoaderCreateInfo* createInfo)
 
         const char* search = nullptr;
         search             = strstr(line, "ALPHA");
-        if(search && 1 == sscanf(search, "ALPHA %d", &temp)) {
+        if(search && 1 == sscanf(search, "ALPHA %d", &temp))
+        {
           material.alpha = temp;
         }
         search = strstr(line, "LUMINANCE");
-        if(search && 1 == sscanf(search, "LUMINANCE %d", &temp)) {
+        if(search && 1 == sscanf(search, "LUMINANCE %d", &temp))
+        {
           material.emissive = temp;
         }
         search = strstr(line, "GLITTER");
         if(search
            && 4
                   == sscanf(search, "GLITTER VALUE #%X FRACTION %f VFRACTION %f SIZE %f", &temp,
-                            &material.glitter.fraction, &material.glitter.vfraction, &material.glitter.size)) {
+                            &material.glitter.fraction, &material.glitter.vfraction, &material.glitter.size))
+        {
           material.glitter.color[2] = (temp >> 0) & 0xFF;
           material.glitter.color[1] = (temp >> 8) & 0xFF;
           material.glitter.color[0] = (temp >> 16) & 0xFF;
@@ -2336,28 +2537,34 @@ LdrResult Loader::init(const LdrLoaderCreateInfo* createInfo)
         if(search
            && 4
                   == sscanf(search, "SPECKLE VALUE #%X FRACTION %f MINSIZE %f MAXSIZE %f", &temp,
-                            &material.speckle.fraction, &material.speckle.minsize, &material.speckle.maxsize)) {
+                            &material.speckle.fraction, &material.speckle.minsize, &material.speckle.maxsize))
+        {
           material.speckle.color[2] = (temp >> 0) & 0xFF;
           material.speckle.color[1] = (temp >> 8) & 0xFF;
           material.speckle.color[0] = (temp >> 16) & 0xFF;
           material.type             = LDR_MATERIAL_SPECKLE;
         }
 
-        if(strstr(line, "METAL")) {
+        if(strstr(line, "METAL"))
+        {
           material.type = LDR_MATERIAL_METALLIC;
         }
-        if(strstr(line, "RUBBER")) {
+        if(strstr(line, "RUBBER"))
+        {
           material.type = LDR_MATERIAL_RUBBER;
         }
-        if(strstr(line, "CHROME")) {
+        if(strstr(line, "CHROME"))
+        {
           material.type = LDR_MATERIAL_CHROME;
         }
-        if(strstr(line, "PEARLESCENT")) {
+        if(strstr(line, "PEARLESCENT"))
+        {
           material.type = LDR_MATERIAL_PEARL;
         }
       }
 
-      if(m_materials.size() <= code) {
+      if(m_materials.size() <= code)
+      {
         m_materials.resize(code + 1, getDefaultMaterial());
       }
 
@@ -2374,14 +2581,17 @@ LdrResult Loader::init(const LdrLoaderCreateInfo* createInfo)
 
 void Loader::deinit()
 {
-  for(size_t i = 0; i < m_parts.size(); i++) {
+  for(size_t i = 0; i < m_parts.size(); i++)
+  {
     deinitPart(m_parts[i]);
   }
-  for(size_t i = 0; i < m_primitives.size(); i++) {
+  for(size_t i = 0; i < m_primitives.size(); i++)
+  {
     deinitPart(m_primitives[i]);
   }
   // use part sizes for renderparts
-  for(size_t i = 0; i < m_parts.size(); i++) {
+  for(size_t i = 0; i < m_parts.size(); i++)
+  {
     deinitRenderPart(m_renderParts[i]);
   }
 
@@ -2412,43 +2622,54 @@ LdrResult Loader::registerInternalPart(const char* filename, const std::string& 
   std::lock_guard<std::mutex> lockguard(m_partRegistryMutex);
 #endif
   PartEntry newentry;
-  if(isPrimitive) {
+  if(isPrimitive)
+  {
     newentry.primID = m_primitives.size();
-    if(newentry.primID == MAX_PRIMS) {
+    if(newentry.primID == MAX_PRIMS)
+    {
       return LDR_ERROR_RESERVED_MEMORY;
     }
   }
-  else {
+  else
+  {
     newentry.partID = m_parts.size();
-    if(newentry.partID == MAX_PARTS) {
+    if(newentry.partID == MAX_PARTS)
+    {
       return LDR_ERROR_RESERVED_MEMORY;
     }
   }
 
   const auto it = m_partRegistry.insert({filename, newentry});
-  if(it.second) {
+  if(it.second)
+  {
     entry  = newentry;
     result = LDR_SUCCESS;
-    if(isPrimitive) {
+    if(isPrimitive)
+    {
       m_primitives.push_back({LDR_ERROR_INITIALIZATION});
       m_primitiveFoundnames.push_back(foundname);
-      if(startLoad) {
+      if(startLoad)
+      {
         startPrimitive(entry.primID);
       }
     }
-    else {
+    else
+    {
       m_parts.push_back({LDR_ERROR_INITIALIZATION});
       m_partFoundnames.push_back(foundname);
-      if(startLoad) {
+      if(startLoad)
+      {
         startPart(entry.partID);
       }
       // load will take care of those, so block these actions
-      if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD) {
+      if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD)
+      {
         startBuildRender(entry.partID);
       }
     }
   }
-  else {
+  else
+  {
     entry  = it.first->second;
     result = LDR_WARNING_IN_USE;
   }
@@ -2458,12 +2679,14 @@ LdrResult Loader::registerInternalPart(const char* filename, const std::string& 
 
 bool Loader::findLibraryFile(const char* filename, std::string& foundname, bool allowPrimitives, bool& isPrimitive)
 {
-  for(uint32_t i = allowPrimitives ? (m_config.partHiResPrimitives ? 0 : 1) : PRIMITIVE_PATHS; i < SEARCH_PATHS; i++) {
+  for(uint32_t i = allowPrimitives ? (m_config.partHiResPrimitives ? 0 : 1) : PRIMITIVE_PATHS; i < SEARCH_PATHS; i++)
+  {
     foundname = m_searchPaths[i] + filename;
 
     FILE* f     = fopen(foundname.c_str(), "rb");
     bool  found = f != nullptr;
-    if(f) {
+    if(f)
+    {
       fclose(f);
       isPrimitive = i < PRIMITIVE_PATHS;
       if(allowPrimitives && SUBPART_AS_PRIMITIVE && filename[0] == 's' && (filename[1] == '/' || filename[1] == '\\'))
@@ -2478,26 +2701,33 @@ bool Loader::findLibraryFile(const char* filename, std::string& foundname, bool 
 LdrResult Loader::deferPart(const char* filename, bool allowPrimitives, PartEntry& entry)
 {
   bool found = findEntry(filename, entry) == LDR_SUCCESS;
-  if(!found) {
+  if(!found)
+  {
     // try register
     std::string foundname;
     bool        isPrimitive;
-    if(findLibraryFile(filename, foundname, allowPrimitives, isPrimitive)) {
+    if(findLibraryFile(filename, foundname, allowPrimitives, isPrimitive))
+    {
       LdrResult result = registerInternalPart(filename, foundname, isPrimitive, false, entry);
-      if(result == LDR_WARNING_IN_USE) {
+      if(result == LDR_WARNING_IN_USE)
+      {
         // someone else was faster at registration
-        if(entry.isPrimitive() != isPrimitive) {
+        if(entry.isPrimitive() != isPrimitive)
+        {
           return LDR_ERROR_INVALID_OPERATION;
         }
-        else {
+        else
+        {
           return LDR_SUCCESS;
         }
       }
-      else {
+      else
+      {
         return result;
       }
     }
-    else {
+    else
+    {
       return LDR_ERROR_FILE_NOT_FOUND;
     }
   }
@@ -2509,39 +2739,49 @@ LdrResult Loader::resolvePart(const char* filename, bool allowPrimitives, PartEn
 {
   bool found = findEntry(filename, entry) == LDR_SUCCESS;
 
-  if(!found) {
+  if(!found)
+  {
     // try register
     std::string foundname;
     bool        isPrimitive = false;
-    if(findLibraryFile(filename, foundname, allowPrimitives, isPrimitive)) {
+    if(findLibraryFile(filename, foundname, allowPrimitives, isPrimitive))
+    {
       LdrResult result = registerInternalPart(filename, foundname, isPrimitive, true, entry);
-      if(result == LDR_SUCCESS) {
+      if(result == LDR_SUCCESS)
+      {
         // we are the first, let's load the part
-        if(isPrimitive) {
+        if(isPrimitive)
+        {
           result = loadData(m_primitives[entry.primID], m_renderParts[entry.primID], foundname.c_str(), isPrimitive, depth);
           signalPrimitive(entry.primID);
         }
-        else {
+        else
+        {
           result = loadData(m_parts[entry.partID], m_renderParts[entry.partID], foundname.c_str(), isPrimitive, depth);
           signalPart(entry.partID);
-          if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD) {
+          if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD)
+          {
             signalBuildRender(entry.partID);
           }
         }
         return result;
       }
-      else if(result == LDR_WARNING_IN_USE) {
+      else if(result == LDR_WARNING_IN_USE)
+      {
         // someone else was faster at registration
         found = true;
-        if(entry.isPrimitive() != isPrimitive) {
+        if(entry.isPrimitive() != isPrimitive)
+        {
           return LDR_ERROR_INVALID_OPERATION;
         }
       }
-      else {
+      else
+      {
         return result;
       }
     }
-    else {
+    else
+    {
 #ifdef _DEBUG
       fprintf(stderr, "file not found: %s\n", filename);
 #endif
@@ -2549,18 +2789,23 @@ LdrResult Loader::resolvePart(const char* filename, bool allowPrimitives, PartEn
     }
   }
 
-  if(found) {
+  if(found)
+  {
     // wait until loading completed / start loading
-    if(entry.isPrimitive()) {
+    if(entry.isPrimitive())
+    {
       waitPrimitive(entry.primID);
       return m_primitives[entry.primID].loadResult;
     }
-    else {
+    else
+    {
       // deferred loads could mean we have not started loading despite having found something
-      if(startPartAction(entry.partID)) {
+      if(startPartAction(entry.partID))
+      {
         loadData(m_parts[entry.partID], m_renderParts[entry.partID], m_partFoundnames[entry.partID].c_str(), false, depth);
         signalPart(entry.partID);
-        if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD) {
+        if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD)
+        {
           signalBuildRender(entry.partID);
         }
       }
@@ -2577,10 +2822,12 @@ LdrResult Loader::resolveRenderPart(LdrPartID partid)
   waitPart(partid);
 
   bool built = false;
-  if(startBuildRenderAction(partid)) {
+  if(startBuildRenderAction(partid))
+  {
     buildRenderPart(partid);
   }
-  else {
+  else
+  {
     waitBuildRender(partid);
   }
 
@@ -2590,7 +2837,8 @@ LdrResult Loader::resolveRenderPart(LdrPartID partid)
 
 LdrResult Loader::registerShapeType(const char* filename, LdrShapeType type)
 {
-  if(type == LDR_INVALID_SHAPETYPE) {
+  if(type == LDR_INVALID_SHAPETYPE)
+  {
     return LDR_ERROR_INVALID_OPERATION;
   }
 
@@ -2604,7 +2852,8 @@ LdrResult Loader::registerPrimitive(const char* filename, const LdrPart* part)
   PartEntry entry;
   LdrResult result = registerInternalPart(filename, filename, true, true, entry);
 
-  if(result == LDR_SUCCESS) {
+  if(result == LDR_SUCCESS)
+  {
     m_primitives[entry.primID] = *part;
     signalPrimitive(entry.primID);
     return LDR_SUCCESS;
@@ -2618,7 +2867,8 @@ LdrResult Loader::registerPart(const char* filename, const LdrPart* part, LdrPar
   PartEntry entry;
   LdrResult result = registerInternalPart(filename, filename, false, true, entry);
 
-  if(result == LDR_SUCCESS) {
+  if(result == LDR_SUCCESS)
+  {
     m_parts[entry.partID] = *part;
     signalPart(entry.partID);
 
@@ -2632,7 +2882,8 @@ LdrResult Loader::registerPart(const char* filename, const LdrPart* part, LdrPar
 
 LdrResult Loader::registerRenderPart(LdrPartID partid, const LdrRenderPart* rpart)
 {
-  if(partid >= getNumRegisteredParts()) {
+  if(partid >= getNumRegisteredParts())
+  {
     return LDR_ERROR_INVALID_OPERATION;
   }
 
@@ -2651,7 +2902,8 @@ LdrResult Loader::rawAllocate(size_t size, LdrRawData* raw)
 
 LdrResult Loader::rawFree(const LdrRawData* raw)
 {
-  if(raw->data) {
+  if(raw->data)
+  {
     _mm_free(raw->data);
   }
   return LDR_SUCCESS;
@@ -2661,10 +2913,12 @@ LdrResult Loader::preloadPart(const char* filename, LdrPartID* pPartID)
 {
   PartEntry entry;
   LdrResult res = resolvePart(filename, false, entry, 0);
-  if(res == LDR_SUCCESS) {
+  if(res == LDR_SUCCESS)
+  {
     *pPartID = entry.partID;
   }
-  else {
+  else
+  {
     *pPartID = LDR_INVALID_ID;
   }
 
@@ -2679,24 +2933,30 @@ LdrResult Loader::buildRenderParts(uint32_t numParts, const LdrPartID* parts, si
   bool inFlight = false;
   bool all      = false;
 
-  if(parts == nullptr) {
+  if(parts == nullptr)
+  {
     numParts = getNumRegisteredParts();
     all      = true;
   }
 
   const uint8_t* partsBytes = (const uint8_t*)parts;
-  for(uint32_t i = 0; i < numParts; i++) {
+  for(uint32_t i = 0; i < numParts; i++)
+  {
     LdrPartID partid = all ? (LdrPartID)i : *(const LdrPartID*)(partsBytes + i * partStride);
-    if(startBuildRenderAction(partid)) {
+    if(startBuildRenderAction(partid))
+    {
       buildRenderPart(partid);
     }
-    else {
+    else
+    {
       inFlight = true;
     }
   }
 
-  if(inFlight) {
-    for(uint32_t i = 0; i < numParts; i++) {
+  if(inFlight)
+  {
+    for(uint32_t i = 0; i < numParts; i++)
+    {
       LdrPartID partid = all ? (LdrPartID)i : *(const LdrPartID*)(partsBytes + i * partStride);
       waitBuildRender(partid);
     }
@@ -2712,41 +2972,51 @@ LdrResult Loader::loadDeferredParts(uint32_t numParts, const LdrPartID* parts, s
   bool      inFlight    = false;
   bool      all         = false;
 
-  if(numParts == ~0 && parts == nullptr) {
+  if(numParts == ~0 && parts == nullptr)
+  {
     numParts = getNumRegisteredParts();
     all      = true;
   }
 
-  for(uint32_t i = 0; i < numParts; i++) {
+  for(uint32_t i = 0; i < numParts; i++)
+  {
     LdrPartID partID = all ? (LdrPartID)i : *(const LdrPartID*)(((const uint8_t*)parts) + partStride * i);
-    if(startPartAction(partID)) {
+    if(startPartAction(partID))
+    {
       LdrResult result = loadData(m_parts[partID], m_renderParts[partID], m_partFoundnames[partID].c_str(), false, 0);
       signalPart(partID);
-      if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD) {
+      if(m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD)
+      {
         signalBuildRender(partID);
       }
-      if(result != LDR_SUCCESS) {
+      if(result != LDR_SUCCESS)
+      {
         resultFinal = result;
       }
     }
-    else {
+    else
+    {
       inFlight = true;
     }
   }
 
-  if(inFlight) {
-    for(uint32_t i = 0; i < numParts; i++) {
+  if(inFlight)
+  {
+    for(uint32_t i = 0; i < numParts; i++)
+    {
       LdrPartID partID = all ? (LdrPartID)i : *(const LdrPartID*)(((const uint8_t*)parts) + partStride * i);
       waitPart(partID);
 
       LdrResult result = m_parts[partID].loadResult;
-      if(result != LDR_SUCCESS) {
+      if(result != LDR_SUCCESS)
+      {
         resultFinal = result;
       }
     }
   }
 
-  if(resultFinal == LDR_ERROR_FILE_NOT_FOUND) {
+  if(resultFinal == LDR_ERROR_FILE_NOT_FOUND)
+  {
     resultFinal = LDR_WARNING_PART_NOT_FOUND;
   }
 
@@ -2757,10 +3027,12 @@ LdrResult Loader::createModel(const char* filename, LdrBool32 autoResolve, LdrMo
 {
   LdrModel* model  = new LdrModel;
   LdrResult result = loadModel(*model, filename, autoResolve);
-  if(result == LDR_SUCCESS || result == LDR_WARNING_PART_NOT_FOUND) {
+  if(result == LDR_SUCCESS || result == LDR_WARNING_PART_NOT_FOUND)
+  {
     *pModel = model;
   }
-  else {
+  else
+  {
     delete model;
   }
   return result;
@@ -2773,21 +3045,26 @@ LdrResult Loader::resolveModel(LdrModelHDL model)
 
   LdrResult result = LDR_SUCCESS;
 
-  for(uint32_t i = 0; i < model->num_instances; i++) {
+  for(uint32_t i = 0; i < model->num_instances; i++)
+  {
     const LdrInstance& instance = model->instances[i];
     const LdrPart&     part     = getPart(instance.part);
-    if(part.loadResult != LDR_SUCCESS) {
+    if(part.loadResult != LDR_SUCCESS)
+    {
       result = part.loadResult;
     }
 
-    if(part.num_shapes || part.num_positions) {
+    if(part.num_shapes || part.num_positions)
+    {
       builder.instances.push_back(instance);
       bbox_merge(builder.bbox, instance.transform, getPart(instance.part).bbox);
     }
     // flatten
-    for(uint32_t s = 0; s < part.num_instances; s++) {
+    for(uint32_t s = 0; s < part.num_instances; s++)
+    {
       LdrInstance subinstance = part.instances[s];
-      if(subinstance.material == LDR_MATERIALID_INHERIT) {
+      if(subinstance.material == LDR_MATERIALID_INHERIT)
+      {
         subinstance.material = instance.material;
       }
       subinstance.transform = mat_mul(instance.transform, subinstance.transform);
@@ -2804,7 +3081,8 @@ LdrResult Loader::resolveModel(LdrModelHDL model)
 
 void Loader::destroyModel(LdrModelHDL model)
 {
-  if(model) {
+  if(model)
+  {
     deinitModel(*(LdrModel*)model);
     delete(LdrModel*)model;
   }
@@ -2814,10 +3092,12 @@ LdrResult Loader::createRenderModel(LdrModelHDL model, LdrBool32 autoResolve, Ld
 {
   LdrRenderModel* renderModel = new LdrRenderModel;
   LdrResult       result      = makeRenderModel(*renderModel, model, autoResolve);
-  if(result == LDR_SUCCESS || result == LDR_WARNING_PART_NOT_FOUND) {
+  if(result == LDR_SUCCESS || result == LDR_WARNING_PART_NOT_FOUND)
+  {
     *pRenderModel = renderModel;
   }
-  else {
+  else
+  {
     delete renderModel;
   }
 
@@ -2827,7 +3107,8 @@ LdrResult Loader::createRenderModel(LdrModelHDL model, LdrBool32 autoResolve, Ld
 
 void Loader::destroyRenderModel(LdrRenderModelHDL renderModel)
 {
-  if(renderModel) {
+  if(renderModel)
+  {
     deinitRenderModel(*(LdrRenderModel*)renderModel);
     delete(LdrRenderModel*)renderModel;
   }
@@ -2836,7 +3117,8 @@ void Loader::destroyRenderModel(LdrRenderModelHDL renderModel)
 LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char* filename, bool isPrimitive, uint32_t depth)
 {
   Text txt;
-  if(!txt.load(filename)) {
+  if(!txt.load(filename))
+  {
     // actually should not get here, as resolve function takes care of finding files
     assert(0);
 
@@ -2866,7 +3148,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
   char        subfilenameShort[512] = {0};
 
   char* line = txt.buffer;
-  for(size_t i = 0; i < txt.size; i++) {
+  for(size_t i = 0; i < txt.size; i++)
+  {
     if(txt.buffer[i] == '\r')
       txt.buffer[i] = '\n';
     if(txt.buffer[i] != '\n')
@@ -2883,41 +3166,53 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
 
     int typ = atoi(line);
 
-    switch(typ) {
+    switch(typ)
+    {
       case 0: {
         // we only care for BFC
         char* bfc = strstr(line, "0 BFC");
-        if(bfc) {
-          if(certified == BFC_UNKNOWN) {
+        if(bfc)
+        {
+          if(certified == BFC_UNKNOWN)
+          {
             certified = BFC_TRUE;
           }
-          if(strstr(bfc, "CERTIFY")) {
+          if(strstr(bfc, "CERTIFY"))
+          {
             certified = BFC_TRUE;
           }
-          if(strstr(bfc, "NOCERTIFY")) {
+          if(strstr(bfc, "NOCERTIFY"))
+          {
             certified = BFC_FALSE;
           }
-          if(strstr(bfc, "CLIP")) {
+          if(strstr(bfc, "CLIP"))
+          {
             localCull = true;
           }
-          if(strstr(bfc, "NOCLIP")) {
+          if(strstr(bfc, "NOCLIP"))
+          {
             localCull = false;
           }
-          if(strstr(bfc, "CW")) {
+          if(strstr(bfc, "CW"))
+          {
             winding = BFC_CW;
           }
-          if(strstr(bfc, "CCW")) {
+          if(strstr(bfc, "CCW"))
+          {
             winding = BFC_CCW;
           }
-          if(strstr(bfc, "INVERTNEXT")) {
+          if(strstr(bfc, "INVERTNEXT"))
+          {
             invertNext     = true;
             keepInvertNext = true;
           }
         }
-        if(strstr(line, "0 !LDRAW_ORG Subpart")) {
+        if(strstr(line, "0 !LDRAW_ORG Subpart"))
+        {
           builder.flag.isSubpart = 1;
         }
-      } break;
+      }
+      break;
       case 1: {
         // sub file
         LdrMatrix transform;
@@ -2926,7 +3221,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         mat[15]                   = 1.0f;
 
         char* subfilename = subfilenameShort;
-        if(lineLength >= sizeof(subfilenameShort)) {
+        if(lineLength >= sizeof(subfilenameShort))
+        {
           subfilenameLong = std::string(lineLength, 0);
           subfilename     = &subfilenameLong[0];
         }
@@ -2934,7 +3230,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         int read = sscanf(line, "%d %i %f %f %f %f %f %f %f %f %f %f %f %f %[^\n\t]", &dummy, &material, mat + 12, mat + 13,
                           mat + 14, mat + 0, mat + 4, mat + 8, mat + 1, mat + 5, mat + 9, mat + 2, mat + 6, mat + 10, subfilename);
 
-        if(read != 15) {
+        if(read != 15)
+        {
 #ifdef _DEBUG
           fprintf(stderr, "ldr parser error: %s - %s\n", filename, line);
 #endif
@@ -2946,7 +3243,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
 
         // find existing part/primitive
         LdrShapeType shapeType = m_shapeRegistry.empty() ? LDR_INVALID_ID : findShapeType(subfilename);
-        if(shapeType != LDR_INVALID_ID) {
+        if(shapeType != LDR_INVALID_ID)
+        {
           // add to shape vector
           LdrShape shape;
           shape.transform = transform;
@@ -2955,21 +3253,27 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           shape.bfcInvert = invertNext ? 1 : 0;
           builder.shapes.push_back(shape);
         }
-        else {
+        else
+        {
           PartEntry entry;
           LdrResult result = resolvePart(subfilename, true, entry, depth + 1);
-          if(result == LDR_SUCCESS) {
-            if(entry.isPrimitive()) {
+          if(result == LDR_SUCCESS)
+          {
+            if(entry.isPrimitive())
+            {
               appendBuilderPrimitive(builder, transform, entry.primID, material, invertNext);
             }
-            else if(m_parts[entry.partID].flag.isSubpart) {
+            else if(m_parts[entry.partID].flag.isSubpart)
+            {
               appendBuilderSubPart(builder, transform, entry.partID, material, invertNext);
             }
-            else {
+            else
+            {
               appendBuilderPart(builder, transform, entry.partID, material, invertNext);
             }
           }
-          else {
+          else
+          {
             part.loadResult = result;
             return part.loadResult;
           }
@@ -2977,14 +3281,16 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
 
         keepInvertNext = false;
         // append to builder
-      } break;
+      }
+      break;
       case 2: {
         LdrVector vecA;
         LdrVector vecB;
         // line
         int read =
             sscanf(line, "%d %i %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y, &vecA.z, &vecB.x, &vecB.y, &vecB.z);
-        if(read != 8) {
+        if(read != 8)
+        {
 #ifdef _DEBUG
           fprintf(stderr, "ldr parser error: %s - %s\n", filename, line);
 #endif
@@ -3002,7 +3308,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         //assert(material == LDR_MATERIALID_EDGE);
 
         builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecA, vecB)));
-      } break;
+      }
+      break;
       case 3: {
         // triangle
         LdrVector vecA;
@@ -3012,7 +3319,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         int read = sscanf(line, "%d %i %f %f %f %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y, &vecA.z,
                           &vecB.x, &vecB.y, &vecB.z, &vecC.x, &vecC.y, &vecC.z);
 
-        if(read != 11) {
+        if(read != 11)
+        {
 #ifdef _DEBUG
           fprintf(stderr, "ldr parser error: %s - %s\n", filename, line);
 #endif
@@ -3028,15 +3336,18 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         float dist  = std::min(std::min(distA, distB), distC);
 
         float dotA = fabsf(vec_dot(vec_normalize(vec_sub(vecB, vecA)), vec_normalize(vec_sub(vecC, vecA))));
-        if(dotA <= Loader::NO_AREA_TRIANGLE_DOT && dist > Loader::MIN_MERGE_EPSILON) {
+        if(dotA <= Loader::NO_AREA_TRIANGLE_DOT && dist > Loader::MIN_MERGE_EPSILON)
+        {
           uint32_t vidx = (uint32_t)builder.positions.size();
           // normalize to ccw
-          if(winding == BFC_CW) {
+          if(winding == BFC_CW)
+          {
             builder.triangles.push_back(vidx + 2);
             builder.triangles.push_back(vidx + 1);
             builder.triangles.push_back(vidx + 0);
           }
-          else {
+          else
+          {
             builder.triangles.push_back(vidx);
             builder.triangles.push_back(vidx + 1);
             builder.triangles.push_back(vidx + 2);
@@ -3052,7 +3363,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecB, vecC)));
           //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecC, vecA)));
         }
-      } break;
+      }
+      break;
       case 4: {
         // quad
         LdrVector vecA;
@@ -3062,7 +3374,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         // line
         int read = sscanf(line, "%d %i %f %f %f %f %f %f %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y,
                           &vecA.z, &vecB.x, &vecB.y, &vecB.z, &vecC.x, &vecC.y, &vecC.z, &vecD.x, &vecD.y, &vecD.z);
-        if(read != 14) {
+        if(read != 14)
+        {
 #ifdef _DEBUG
           fprintf(stderr, "ldr parser error: %s - %s\n", filename, line);
 #endif
@@ -3074,7 +3387,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
 
         float dotA = fabsf(vec_dot(vec_normalize(vec_sub(vecB, vecA)), vec_normalize(vec_sub(vecC, vecA))));
         float dotD = fabsf(vec_dot(vec_normalize(vec_sub(vecA, vecD)), vec_normalize(vec_sub(vecC, vecD))));
-        if(dotA <= Loader::NO_AREA_TRIANGLE_DOT || dotD <= Loader::NO_AREA_TRIANGLE_DOT) {
+        if(dotA <= Loader::NO_AREA_TRIANGLE_DOT || dotD <= Loader::NO_AREA_TRIANGLE_DOT)
+        {
           uint32_t vidx = (uint32_t)builder.positions.size();
           uint32_t tidx = (uint32_t)builder.triangles.size() / 3;
 
@@ -3082,13 +3396,15 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
 
           uint32_t quad[6] = {0, 1, 2, 2, 3, 0};
 
-          if(Loader::ALLOW_QUAD_EDGEFLIP && dotD < dotA) {
+          if(Loader::ALLOW_QUAD_EDGEFLIP && dotD < dotA)
+          {
             quad[2] = 3;
             quad[5] = 1;
           }
 
           // normalize to ccw
-          if(winding == BFC_CW) {
+          if(winding == BFC_CW)
+          {
             builder.triangles.push_back(vidx + quad[5]);
             builder.triangles.push_back(vidx + quad[4]);
             builder.triangles.push_back(vidx + quad[3]);
@@ -3096,7 +3412,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
             builder.triangles.push_back(vidx + quad[1]);
             builder.triangles.push_back(vidx + quad[0]);
           }
-          else {
+          else
+          {
             builder.triangles.push_back(vidx + quad[0]);
             builder.triangles.push_back(vidx + quad[1]);
             builder.triangles.push_back(vidx + quad[2]);
@@ -3118,7 +3435,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecC, vecD)));
           //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecD, vecA)));
         }
-      } break;
+      }
+      break;
       case 5: {
         // optional line
         LdrVector vecA;
@@ -3126,7 +3444,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         // line
         int read =
             sscanf(line, "%d %i %f %f %f %f %f %f", &dummy, &material, &vecA.x, &vecA.y, &vecA.z, &vecB.x, &vecB.y, &vecB.z);
-        if(read != 8) {
+        if(read != 8)
+        {
 #ifdef _DEBUG
           fprintf(stderr, "ldr parser error: %s - %s\n", filename, line);
 #endif
@@ -3143,18 +3462,22 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         builder.positions.push_back(vecB);
 
         builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecA, vecB)));
-      } break;
+      }
+      break;
     }
 
-    if((typ == 1 || typ == 3 || typ == 4) && material != LDR_MATERIALID_INHERIT) {
+    if((typ == 1 || typ == 3 || typ == 4) && material != LDR_MATERIALID_INHERIT)
+    {
       builder.flag.hasComplexMaterial = 1;
     }
-    if((typ == 3 || typ == 4) && (!localCull || certified != BFC_TRUE)) {
+    if((typ == 3 || typ == 4) && (!localCull || certified != BFC_TRUE))
+    {
       // inconsistent clipping state for this part
       builder.flag.hasNoBackFaceCulling = 1;
     }
 
-    if(!keepInvertNext) {
+    if(!keepInvertNext)
+    {
       invertNext = false;
     }
 
@@ -3162,22 +3485,26 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
     line          = txt.buffer + (i + 1);
   }
 
-  for(size_t i = 0; i < builder.positions.size(); i++) {
+  for(size_t i = 0; i < builder.positions.size(); i++)
+  {
     bbox_merge(builder.bbox, builder.positions[i]);
   }
   compactBuilderPart(builder);
 
-  if(!isPrimitive && m_config.partFixMode == LDR_PART_FIX_ONLOAD) {
+  if(!isPrimitive && m_config.partFixMode == LDR_PART_FIX_ONLOAD)
+  {
     MeshUtils::fixBuilderPart(builder, m_config);
   }
 
   initPart(part, builder);
   part.loadResult = LDR_SUCCESS;
 
-  if((!isPrimitive && !builder.flag.isSubpart) && m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD) {
+  if((!isPrimitive && !builder.flag.isSubpart) && m_config.renderpartBuildMode == LDR_RENDERPART_BUILD_ONLOAD)
+  {
     LdrPart partTemp = part;
 
-    if(!m_config.partFixMode == LDR_PART_FIX_ONLOAD) {
+    if(!m_config.partFixMode == LDR_PART_FIX_ONLOAD)
+    {
       MeshUtils::fixBuilderPart(builder, m_config);
       initPart(partTemp, builder);
     }
@@ -3188,7 +3515,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
     MeshUtils::buildRenderPart(builderRender, partTemp, m_config);
     initRenderPart(renderPart, builderRender, partTemp);
 
-    if(!m_config.partFixMode == LDR_PART_FIX_ONLOAD) {
+    if(!m_config.partFixMode == LDR_PART_FIX_ONLOAD)
+    {
       deinitPart(partTemp);
     }
   }
@@ -3205,7 +3533,8 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
   char        subfilenameShort[512] = {0};
 
   char* line = txt.buffer;
-  for(size_t i = 0; i < txt.size; i++) {
+  for(size_t i = 0; i < txt.size; i++)
+  {
     if(txt.buffer[i] == '\r')
       txt.buffer[i] = '\n';
     if(txt.buffer[i] != '\n')
@@ -3218,14 +3547,16 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
     int typ = atoi(line);
 
     // only interested in parts
-    if(typ == 1) {
+    if(typ == 1)
+    {
       LdrInstance instance;
       float*      mat = instance.transform.values;
       mat[3] = mat[7] = mat[11] = 0;
       mat[15]                   = 1.0f;
 
       char* subfilename = subfilenameShort;
-      if(lineLength >= sizeof(subfilenameShort)) {
+      if(lineLength >= sizeof(subfilenameShort))
+      {
         subfilenameLong = std::string(lineLength, 0);
         subfilename     = &subfilenameLong[0];
       }
@@ -3238,49 +3569,62 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
       instance.material = fixupMaterialID(materialRead);
 
       instance.transform = mat_mul(transform, instance.transform);
-      if(instance.material == LDR_MATERIALID_INHERIT) {
+      if(instance.material == LDR_MATERIALID_INHERIT)
+      {
         instance.material = material;
       }
 
-      if(read == 15) {
+      if(read == 15)
+      {
         // look in subfiles
         bool found = false;
-        for(size_t i = 0; i < builder.subFilenames.size(); i++) {
-          if(builder.subFilenames[i] == std::string(subfilename)) {
+        for(size_t i = 0; i < builder.subFilenames.size(); i++)
+        {
+          if(builder.subFilenames[i] == std::string(subfilename))
+          {
             LdrResult result =
                 appendSubModel(builder, builder.subTexts[i], instance.transform, instance.material, autoResolve, depth + 1);
-            if(result == LDR_SUCCESS) {
+            if(result == LDR_SUCCESS)
+            {
               found = true;
             }
-            else if(result == LDR_WARNING_PART_NOT_FOUND || result == LDR_ERROR_FILE_NOT_FOUND) {
+            else if(result == LDR_WARNING_PART_NOT_FOUND || result == LDR_ERROR_FILE_NOT_FOUND)
+            {
               found       = true;
               finalResult = LDR_WARNING_PART_NOT_FOUND;
             }
-            else {
+            else
+            {
               return result;
             }
           }
         }
         // look in library
-        if(!found) {
+        if(!found)
+        {
           PartEntry entry;
           LdrResult result =
               autoResolve ? resolvePart(subfilename, false, entry, depth + 1) : deferPart(subfilename, false, entry);
-          if(result == LDR_SUCCESS) {
+          if(result == LDR_SUCCESS)
+          {
             instance.part = entry.partID;
             assert(instance.part != LDR_INVALID_ID);
             builder.instances.push_back(instance);
 
-            if(autoResolve) {
+            if(autoResolve)
+            {
               const LdrPart& part = getPart(instance.part);
 
-              if(part.num_shapes || part.num_positions) {
+              if(part.num_shapes || part.num_positions)
+              {
                 bbox_merge(builder.bbox, instance.transform, getPart(instance.part).bbox);
               }
               // flatten
-              for(uint32_t s = 0; s < part.num_instances; s++) {
+              for(uint32_t s = 0; s < part.num_instances; s++)
+              {
                 LdrInstance subinstance = part.instances[s];
-                if(subinstance.material == LDR_MATERIALID_INHERIT) {
+                if(subinstance.material == LDR_MATERIALID_INHERIT)
+                {
                   subinstance.material = instance.material;
                 }
                 subinstance.transform = mat_mul(instance.transform, subinstance.transform);
@@ -3290,15 +3634,18 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
               }
             }
           }
-          else if(result == LDR_WARNING_PART_NOT_FOUND || result == LDR_ERROR_FILE_NOT_FOUND) {
+          else if(result == LDR_WARNING_PART_NOT_FOUND || result == LDR_ERROR_FILE_NOT_FOUND)
+          {
             finalResult = LDR_WARNING_PART_NOT_FOUND;
           }
-          else {
+          else
+          {
             return result;
           }
         }
       }
-      else {
+      else
+      {
         return LDR_ERROR_PARSER;
       }
     }
@@ -3312,7 +3659,8 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
 LdrResult Loader::loadModel(LdrModel& model, const char* filename, LdrBool32 autoResolve)
 {
   Text txt;
-  if(!txt.load(filename)) {
+  if(!txt.load(filename))
+  {
     return LDR_ERROR_FILE_NOT_FOUND;
   }
 
@@ -3322,7 +3670,8 @@ LdrResult Loader::loadModel(LdrModel& model, const char* filename, LdrBool32 aut
   BuilderModel builder;
   // split into sub-texts
   bool isMpd = false;
-  if(strstr(filename, ".mpd") || strstr(filename, ".MPD")) {
+  if(strstr(filename, ".mpd") || strstr(filename, ".MPD"))
+  {
     isMpd = true;
 
     std::string nextFilename;
@@ -3330,7 +3679,8 @@ LdrResult Loader::loadModel(LdrModel& model, const char* filename, LdrBool32 aut
     char* nextFileBegin = txt.buffer;
     char* line          = txt.buffer;
 
-    for(size_t i = 0; i < txt.size; i++) {
+    for(size_t i = 0; i < txt.size; i++)
+    {
       if(txt.buffer[i] == '\r')
         txt.buffer[i] = '\n';
       if(txt.buffer[i] != '\n')
@@ -3342,17 +3692,21 @@ LdrResult Loader::loadModel(LdrModel& model, const char* filename, LdrBool32 aut
       // parse line
       int typ = atoi(line);
 
-      if(typ == 0) {
+      if(typ == 0)
+      {
 
         char* subfilename = subfilenameShort;
-        if(lineLength >= sizeof(subfilenameShort)) {
+        if(lineLength >= sizeof(subfilenameShort))
+        {
           subfilenameLong = std::string(lineLength, 0);
           subfilename     = &subfilenameLong[0];
         }
 
         int read = sscanf(line, "0 FILE %[^\n\t]", subfilename);
-        if(read == 1) {
-          if(nextFileBegin && nextFileBegin != line) {
+        if(read == 1)
+        {
+          if(nextFileBegin && nextFileBegin != line)
+          {
             Text subTxt;
             subTxt.buffer     = nextFileBegin;
             subTxt.size       = line - nextFileBegin;
@@ -3395,15 +3749,18 @@ LdrResult Loader::makeRenderModel(LdrRenderModel& rmodel, LdrModelHDL model, Ldr
   BuilderRenderModel builder;
 
   builder.bbox = model->bbox;
-  for(uint32_t i = 0; i < model->num_instances; i++) {
+  for(uint32_t i = 0; i < model->num_instances; i++)
+  {
     const LdrInstance&    instance = model->instances[i];
     BuilderRenderInstance rinstance;
     rinstance.instance = instance;
 
-    if(autoResolve) {
+    if(autoResolve)
+    {
       // try to build on-demand
       LdrResult result = resolveRenderPart(instance.part);
-      if(result != LDR_SUCCESS) {
+      if(result != LDR_SUCCESS)
+      {
         return result;
       }
     }
@@ -3423,14 +3780,16 @@ class Utils
 public:
   static inline void pushWithOffset(Loader::TVector<LdrVertexIndex>& indices, uint32_t offset, uint32_t num, const LdrVertexIndex* src)
   {
-    for(uint32_t i = 0; i < num; i++) {
+    for(uint32_t i = 0; i < num; i++)
+    {
       indices.push_back(src[i] + offset);
     }
   }
 
   static inline void pushWithOffsetRev3(Loader::TVector<LdrVertexIndex>& indices, uint32_t offset, uint32_t num, const LdrVertexIndex* src)
   {
-    for(uint32_t i = 0; i < num; i++) {
+    for(uint32_t i = 0; i < num; i++)
+    {
       indices.push_back(src[i * 3 + 2] + offset);
       indices.push_back(src[i * 3 + 1] + offset);
       indices.push_back(src[i * 3 + 0] + offset);
@@ -3439,7 +3798,8 @@ public:
 
   static inline void pushWithOffsetRev4(Loader::TVector<LdrVertexIndex>& indices, uint32_t offset, uint32_t num, const LdrVertexIndex* src)
   {
-    for(uint32_t i = 0; i < num; i++) {
+    for(uint32_t i = 0; i < num; i++)
+    {
       indices.push_back(src[i * 4 + 3] + offset);
       indices.push_back(src[i * 4 + 2] + offset);
       indices.push_back(src[i * 4 + 1] + offset);
@@ -3450,7 +3810,8 @@ public:
   template <class T>
   static inline void copyAppend(Loader::TVector<T>& dst, uint32_t num, const T* src)
   {
-    if(num) {
+    if(num)
+    {
       size_t begin = dst.size();
       dst.resize(dst.size() + num);
       memcpy(dst.data() + begin, src, sizeof(T) * num);
@@ -3464,7 +3825,8 @@ public:
     size_t   numTri       = numIndices / 3;
     uint32_t skipped      = 0;
     bool     prevWasValid = false;
-    for(size_t i = 0; i < numTri; i++) {
+    for(size_t i = 0; i < numTri; i++)
+    {
       uint32_t      origQuad     = quads[i];
       LdrMaterialID origMaterial = materials[i];
       uint32_t      orig[3];
@@ -3477,14 +3839,18 @@ public:
       newIdx[1] = remap[orig[1]];
       newIdx[2] = remap[orig[2]];
 
-      if(newIdx[0] == newIdx[1] || newIdx[1] == newIdx[2] || newIdx[2] == newIdx[0]) {
+      if(newIdx[0] == newIdx[1] || newIdx[1] == newIdx[2] || newIdx[2] == newIdx[0])
+      {
         // tell other triangle it's no longer a quad
-        if(origQuad != LDR_INVALID_IDX) {
+        if(origQuad != LDR_INVALID_IDX)
+        {
           // we are the first, then disable state for next
-          if(origQuad == i) {
+          if(origQuad == i)
+          {
             quads[i + 1] = LDR_INVALID_IDX;
           }  // we are second, then disable for previous
-          else if(origQuad == i - 1 && prevWasValid) {
+          else if(origQuad == i - 1 && prevWasValid)
+          {
             quads[outTri - 1] = LDR_INVALID_IDX;
           }
         }
@@ -3511,7 +3877,8 @@ public:
   static size_t applyRemap2(size_t numIndices, LdrVertexIndex* indices, const uint32_t* LDR_RESTRICT remap)
   {
     size_t outIndices = 0;
-    for(size_t i = 0; i < numIndices / 2; i++) {
+    for(size_t i = 0; i < numIndices / 2; i++)
+    {
       uint32_t orig[2];
       orig[0] = indices[i * 2 + 0];
       orig[1] = indices[i * 2 + 1];
@@ -3535,7 +3902,8 @@ public:
   template <class T>
   static void fillVector(Loader::TVector<T>& vec, const T* data, uint32_t num)
   {
-    if(data) {
+    if(data)
+    {
       vec.resize(num);
       memcpy(vec.data(), data, sizeof(T) * num);
     }
@@ -3544,7 +3912,8 @@ public:
   inline static void alignSize(LdrRawData& raw, size_t alignSz)
   {
     size_t rest = raw.size % alignSz;
-    if(rest) {
+    if(rest)
+    {
       raw.size += alignSz - rest;
     }
   }
@@ -3592,10 +3961,12 @@ public:
   template <class T, class Tout>
   static void setup_pointer(LdrRawData& raw, Tout*& ptrRef, const Loader::TVector<T>& vec)
   {
-    if(vec.empty()) {
+    if(vec.empty())
+    {
       ptrRef = nullptr;
     }
-    else {
+    else
+    {
       size_t offset = (size_t)ptrRef;
       ptrRef        = (Tout*)((uint8_t*)raw.data + offset);
       memcpy(ptrRef, vec.data(), vec.size() * sizeof(Tout));
@@ -3607,10 +3978,12 @@ public:
   template <class T, class Tout>
   static void setup_pointer(LdrRawData& raw, Tout*& ptrRef, size_t num, const T* data)
   {
-    if(num == 0) {
+    if(num == 0)
+    {
       ptrRef = nullptr;
     }
-    else {
+    else
+    {
       size_t offset = (size_t)ptrRef;
       ptrRef        = (Tout*)((uint8_t*)raw.data + offset);
       memcpy(ptrRef, data, num * sizeof(Tout));
@@ -3622,10 +3995,12 @@ public:
   template <class Tout>
   static void setup_pointer(LdrRawData& raw, Tout*& ptrRef, size_t offset, bool valid = true)
   {
-    if(valid) {
+    if(valid)
+    {
       ptrRef = (Tout*)((uint8_t*)raw.data + offset);
     }
-    else {
+    else
+    {
       ptrRef = nullptr;
     }
   }
@@ -3633,11 +4008,13 @@ public:
   template <class Tout>
   static void setup_pointer(LdrRawData& raw, Tout*& ptrRef, bool valid = true)
   {
-    if(valid) {
+    if(valid)
+    {
       size_t offset = (size_t)ptrRef;
       ptrRef        = (Tout*)((uint8_t*)raw.data + offset);
     }
-    else {
+    else
+    {
       ptrRef = nullptr;
     }
   }
@@ -3648,7 +4025,8 @@ void Loader::appendBuilderPart(BuilderPart& builder, const LdrMatrix& transform,
 {
   assert(flipWinding == false);
   const LdrPart& part = getPart(partid);
-  if(part.num_positions || part.num_shapes) {
+  if(part.num_positions || part.num_shapes)
+  {
     LdrInstance instance;
     instance.material  = material;
     instance.part      = partid;
@@ -3656,10 +4034,12 @@ void Loader::appendBuilderPart(BuilderPart& builder, const LdrMatrix& transform,
     builder.instances.push_back(instance);
   }
   // flatten sub parts
-  for(uint32_t s = 0; s < part.num_instances; s++) {
+  for(uint32_t s = 0; s < part.num_instances; s++)
+  {
     LdrInstance subinstance = part.instances[s];
     subinstance.transform   = mat_mul(transform, subinstance.transform);
-    if(subinstance.material == LDR_MATERIALID_INHERIT) {
+    if(subinstance.material == LDR_MATERIALID_INHERIT)
+    {
       subinstance.material = material;
     }
     builder.instances.push_back(subinstance);
@@ -3699,42 +4079,50 @@ void Loader::appendBuilderEmbed(BuilderPart& builder, const LdrMatrix& transform
   builder.optional_lines.reserve(builder.optional_lines.size() + part.num_optional_lines * 2);
   builder.quads.reserve(builder.quads.size() + part.num_triangles);
 
-  for(uint32_t i = 0; i < part.num_positions; i++) {
+  for(uint32_t i = 0; i < part.num_positions; i++)
+  {
     LdrVector vec = transform_point(transform, part.positions[i]);
     builder.positions.push_back(vec);
     bbox_merge(builder.bbox, vec);
   }
 
   uint32_t triOffset = builder.triangles.size() / 3;
-  for(uint32_t i = 0; i < part.num_triangles; i++) {
+  for(uint32_t i = 0; i < part.num_triangles; i++)
+  {
     builder.quads.push_back(part.quads[i] != LDR_INVALID_IDX ? (part.quads[i] + triOffset) : LDR_INVALID_IDX);
   }
 
-  if(flipWinding) {
+  if(flipWinding)
+  {
     Utils::pushWithOffsetRev3(builder.triangles, vecOffset, part.num_triangles, part.triangles);
   }
-  else {
+  else
+  {
     Utils::pushWithOffset(builder.triangles, vecOffset, part.num_triangles * 3, part.triangles);
   }
   Utils::pushWithOffset(builder.lines, vecOffset, part.num_lines * 2, part.lines);
   Utils::pushWithOffset(builder.optional_lines, vecOffset, part.num_optional_lines * 2, part.optional_lines);
 
-  for(uint32_t i = 0; i < part.num_triangles; i++) {
+  for(uint32_t i = 0; i < part.num_triangles; i++)
+  {
     builder.materials.push_back(part.materials[i] == LDR_MATERIALID_INHERIT ? material : part.materials[i]);
   }
 
   // shapes
   Utils::copyAppend(builder.shapes, part.num_shapes, part.shapes);
-  for(size_t i = shapeOffset; i < builder.shapes.size(); i++) {
+  for(size_t i = shapeOffset; i < builder.shapes.size(); i++)
+  {
     builder.shapes[i].bfcInvert ^= flipWinding ? 1 : 0;
     builder.shapes[i].transform = mat_mul(transform, builder.shapes[i].transform);
   }
 
   // flatten sub parts
-  for(uint32_t s = 0; s < part.num_instances; s++) {
+  for(uint32_t s = 0; s < part.num_instances; s++)
+  {
     LdrInstance subinstance = part.instances[s];
     subinstance.transform   = mat_mul(transform, subinstance.transform);
-    if(subinstance.material == LDR_MATERIALID_INHERIT) {
+    if(subinstance.material == LDR_MATERIALID_INHERIT)
+    {
       subinstance.material = material;
     }
     builder.instances.push_back(subinstance);
@@ -3756,20 +4144,25 @@ static bool SortVertex_cmp(const SortVertex& a, const SortVertex& b)
 inline size_t runMerge(SortVertex& refVertex, SortVertex* LDR_RESTRICT vertices, size_t begin, size_t end, uint32_t* LDR_RESTRICT remap, float epsilon)
 {
   size_t newBegin = 0;
-  for(size_t i = begin; i <= end; i++) {
+  for(size_t i = begin; i <= end; i++)
+  {
     SortVertex& vertex = vertices[i];
-    if(vertex.idx != LDR_INVALID_ID) {
+    if(vertex.idx != LDR_INVALID_ID)
+    {
       bool canMerge = vec_sq_length(vec_sub(vertex.pos, refVertex.pos)) <= epsilon * epsilon;
-      if(canMerge) {
+      if(canMerge)
+      {
         remap[vertex.idx] = refVertex.idx;
         vertex.idx        = LDR_INVALID_ID;
       }
-      else if(!newBegin) {
+      else if(!newBegin)
+      {
         newBegin = i + 1;
       }
     }
   }
-  if(!newBegin) {
+  if(!newBegin)
+  {
     newBegin = end + 1;
   }
   refVertex = vertices[newBegin - 1];
@@ -3794,7 +4187,8 @@ void Loader::compactBuilderPart(BuilderPart& builder)
 
   std::vector<SortVertex> sortedVertices;
   sortedVertices.reserve(numVertices);
-  for(size_t i = 0; i < numVertices; i++) {
+  for(size_t i = 0; i < numVertices; i++)
+  {
     SortVertex svertex;
     svertex.pos = builder.positions[i];
     svertex.idx = (uint32_t)i;
@@ -3812,25 +4206,32 @@ void Loader::compactBuilderPart(BuilderPart& builder)
   size_t     mergeBegin = 1;
   SortVertex refVertex  = sortedVertices[0];
 
-  for(size_t i = 1; i < numVertices; i++) {
+  for(size_t i = 1; i < numVertices; i++)
+  {
     const SortVertex& svertex = sortedVertices[i];
-    while(mergeBegin <= i && ((svertex.dot - refVertex.dot > epsilon) || (i == numVertices - 1))) {
+    while(mergeBegin <= i && ((svertex.dot - refVertex.dot > epsilon) || (i == numVertices - 1)))
+    {
       mergeBegin = runMerge(refVertex, sortedVertices.data(), mergeBegin, i, remapMerge.data(), epsilon);
     }
   }
 
   uint32_t numVerticesNew = 0;
-  for(size_t i = 0; i < numVertices; i++) {
-    if(remapMerge[i] == i) {
+  for(size_t i = 0; i < numVertices; i++)
+  {
+    if(remapMerge[i] == i)
+    {
       remapCompact[i] = numVerticesNew++;
     }
-    else {
+    else
+    {
       remapCompact[i] = LDR_INVALID_ID;
     }
   }
 
-  for(size_t i = 0; i < numVertices; i++) {
-    if(remapCompact[i] != LDR_INVALID_ID) {
+  for(size_t i = 0; i < numVertices; i++)
+  {
+    if(remapCompact[i] != LDR_INVALID_ID)
+    {
       builder.positions[remapCompact[i]] = builder.positions[i];
     }
     remapMerge[i] = remapCompact[remapMerge[i]];
@@ -3895,7 +4296,8 @@ void Loader::fixPart(LdrPartID partid)
 {
   LdrPart& part = m_parts[partid];
 
-  if(!(part.flag.isPrimitive || part.flag.isSubpart)) {
+  if(!(part.flag.isPrimitive || part.flag.isSubpart))
+  {
     BuilderPart builder;
 #ifdef _DEBUG
     builder.loader = this;
@@ -3915,14 +4317,17 @@ void Loader::buildRenderPart(LdrPartID partid)
 {
   LdrRenderPart& renderPart = m_renderParts[partid];
 
-  if(m_parts[partid].flag.isPrimitive || m_parts[partid].flag.isSubpart) {
+  if(m_parts[partid].flag.isPrimitive || m_parts[partid].flag.isSubpart)
+  {
     renderPart = LdrRenderPart();
   }
-  else {
+  else
+  {
     BuilderRenderPart builder;
     builder.loader   = this;
     builder.filename = m_parts[partid].name;
-    if(m_config.partFixMode == LDR_PART_FIX_NONE) {
+    if(m_config.partFixMode == LDR_PART_FIX_NONE)
+    {
       LdrPart parttemp;
 
       BuilderPart builderPart;
@@ -3935,7 +4340,8 @@ void Loader::buildRenderPart(LdrPartID partid)
       initRenderPart(renderPart, builder, parttemp);
       deinitPart(parttemp);
     }
-    else {
+    else
+    {
       MeshUtils::buildRenderPart(builder, m_parts[partid], m_config);
       initRenderPart(renderPart, builder, m_parts[partid]);
     }
@@ -3950,13 +4356,16 @@ void Loader::buildRenderPart(LdrPartID partid)
 void Loader::initPart(LdrPart& part, const BuilderPart& builder)
 {
 #if _DEBUG && EXTRA_ASSERTS
-  for(size_t i = 0; i < builder.lines.size(); i++) {
+  for(size_t i = 0; i < builder.lines.size(); i++)
+  {
     assert(builder.lines[i] <= builder.positions.size());
   }
-  for(size_t i = 0; i < builder.optional_lines.size(); i++) {
+  for(size_t i = 0; i < builder.optional_lines.size(); i++)
+  {
     assert(builder.optional_lines[i] <= builder.positions.size());
   }
-  for(size_t i = 0; i < builder.triangles.size(); i++) {
+  for(size_t i = 0; i < builder.triangles.size(); i++)
+  {
     assert(builder.triangles[i] <= builder.positions.size());
   }
   assert(builder.triangles.size() == builder.materials.size() * 3);
@@ -3994,15 +4403,18 @@ void Loader::initPart(LdrPart& part, const BuilderPart& builder)
 #if _DEBUG && EXTRA_ASSERTS
   assert(builder.positions.size() == part.num_positions);
   assert(builder.lines.size() == part.num_lines * 2);
-  for(size_t i = 0; i < builder.lines.size(); i++) {
+  for(size_t i = 0; i < builder.lines.size(); i++)
+  {
     assert(part.lines[i] <= builder.positions.size());
   }
   assert(builder.optional_lines.size() == part.num_optional_lines * 2);
-  for(size_t i = 0; i < builder.optional_lines.size(); i++) {
+  for(size_t i = 0; i < builder.optional_lines.size(); i++)
+  {
     assert(part.optional_lines[i] <= builder.positions.size());
   }
   assert(builder.triangles.size() == part.num_triangles * 3);
-  for(size_t i = 0; i < builder.triangles.size(); i++) {
+  for(size_t i = 0; i < builder.triangles.size(); i++)
+  {
     assert(part.triangles[i] <= builder.positions.size());
   }
 #endif
@@ -4057,7 +4469,8 @@ void Loader::initRenderModel(LdrRenderModel& rmodel, const BuilderRenderModel& b
 
   Utils::setup_pointer(rmodel.raw, rmodel.instances, 0, true);
 
-  for(uint32_t i = 0; i < rmodel.num_instances; i++) {
+  for(uint32_t i = 0; i < rmodel.num_instances; i++)
+  {
     const LdrRenderPart& part      = getRenderPart(builder.instances[i].instance.part);
     LdrRenderInstance&   rinstance = rmodel.instances[i];
     rinstance.instance             = builder.instances[i].instance;
@@ -4088,6 +4501,47 @@ void Loader::deinitRenderModel(LdrRenderModel& model)
   model.raw = {0, 0};
 }
 
+bool Loader::BuilderPart::isSameQuad(uint32_t tA, uint32_t tB) const
+{
+  if(!isQuad(tA) || !isQuad(tB))
+  {
+    return false;
+  }
+
+  uint32_t quadA[4];
+  uint32_t quadB[4];
+
+  getCanonicalQuad(tA, quadA);
+  getCanonicalQuad(tB, quadB);
+
+  for(uint32_t v = 0; v < 4; v++)
+  {
+    if(quadA[0] == quadB[v])
+    {
+      for(uint32_t i = 1; i < 4; i++)
+      {
+        if(quadA[i] != quadB[(v + i) % 4])
+          return false;
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void Loader::BuilderPart::getCanonicalQuad(uint32_t t, uint32_t quad[4]) const
+{
+  assert(isQuad(t));
+
+  uint32_t first  = quads[t];
+  uint32_t second = first + 1;
+  quad[0]         = triangles[first * 3 + 0];
+  quad[1]         = triangles[first * 3 + 1];
+  quad[2]         = triangles[second * 3 + 0];
+  quad[3]         = triangles[second * 3 + 1];
+}
+
 }  // namespace ldr
 
 //////////////////////////////////////////////////////////////////////////
@@ -4112,10 +4566,12 @@ LDR_API LdrResult ldrCreateLoader(const LdrLoaderCreateInfo* info, LdrLoaderHDL*
   ldr::Loader* loader = new ldr::Loader;
   LdrResult    result = loader->init(info);
 
-  if(result == LDR_SUCCESS) {
+  if(result == LDR_SUCCESS)
+  {
     *pLoader = (LdrLoaderHDL)loader;
   }
-  else {
+  else
+  {
     delete loader;
   }
 
@@ -4123,7 +4579,8 @@ LDR_API LdrResult ldrCreateLoader(const LdrLoaderCreateInfo* info, LdrLoaderHDL*
 }
 LDR_API void ldrDestroyLoader(LdrLoaderHDL loader)
 {
-  if(loader) {
+  if(loader)
+  {
     ldr::Loader* lldr = (ldr::Loader*)loader;
     lldr->deinit();
     delete lldr;
