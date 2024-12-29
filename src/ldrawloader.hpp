@@ -45,9 +45,7 @@ namespace ldr {
 struct Loader
 {
   friend class MeshUtils;
-
-  template <bool VTX_TRIS>
-  friend class TMesh;
+  friend class Mesh;
 
   friend class Utils;
 

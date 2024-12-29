@@ -88,7 +88,7 @@ extern "C" {
 #endif
 
 #define LDR_LOADER_VERSION_MAJOR 0
-#define LDR_LOADER_VERSION_MINOR 4
+#define LDR_LOADER_VERSION_MINOR 5
 #define LDR_LOADER_VERSION_CACHE 0
 
 #define LDR_INVALID_ID uint32_t(~0)
@@ -179,8 +179,8 @@ typedef struct LdrBbox
 
 typedef enum LdrMaterialSpecial : uint32_t
 {
-  LDR_MATERIALID_INHERIT     = 16,
-  LDR_MATERIALID_EDGE        = 24,
+  LDR_MATERIALID_INHERIT = 16,
+  LDR_MATERIALID_EDGE    = 24,
   // materialIds starting from this value are to be interpreted as 0x00RRGGBB
   // about 100 part files use this deprecated method
   LDR_MATERIALID_DIRECTSTART = 0x2000000,
@@ -330,9 +330,9 @@ typedef struct LdrModel
 
 typedef struct LdrRenderVertex
 {
-  LdrVector position;
-  LdrMaterialID material; // validity depends on LdrLoaderCreateInfo::renderpartVertexMaterials
-  LdrVector normal;
+  LdrVector     position;
+  LdrMaterialID material;  // validity depends on LdrLoaderCreateInfo::renderpartVertexMaterials
+  LdrVector     normal;
   uint32_t      _pad;
 } LdrRenderVertex;
 
@@ -428,12 +428,13 @@ typedef struct LdrLoaderCreateInfo
   const char* cacheFile;
 
   LdrPartFixMode partFixMode;
-  LdrBool32      partFixTjunctions;    // required for chamfer
+  LdrBool32      partFixTjunctions;    // improves chamfer
+  LdrBool32      partFixOverlap;       // improves chamfer
   LdrBool32      partHiResPrimitives;  // substitutes with /p/48 if possible
 
   // TODO allow pervertex splits based on materials
   //LdrBool32 renderpartTriangleMaterials;  // keeps triangle materials array
-  LdrBool32 renderpartVertexMaterials;    // split vertices on material edges
+  LdrBool32 renderpartVertexMaterials;  // split vertices on material edges
 
   LdrRenderPartBuildMode renderpartBuildMode;
 

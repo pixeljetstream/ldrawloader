@@ -208,8 +208,7 @@ const float Loader::MIN_MERGE_EPSILON     = 0.015f;  // 1 LDU ~ 0.4mm
 
 static_assert(LDR_INVALID_ID == LDR_INVALID_IDX);
 
-template <bool VTX_TRIS>
-class TMesh
+class Mesh
 {
 public:
   static const uint32_t VTX_BITS = 31;
@@ -217,18 +216,34 @@ public:
 
   static_assert(INVALID == LDR_INVALID_IDX);
 
-  typedef uint64_t vtxPair_t;
+  typedef uint64_t edgeHash_t;
 
-  static vtxPair_t make_vtxPair(uint32_t vtxA, uint32_t vtxB)
+  struct VertexPair
   {
+    uint32_t a;
+    uint32_t b;
+  };
+
+  static edgeHash_t make_edgeHash(uint32_t vtxA, uint32_t vtxB)
+  {
+    union
+    {
+      uint64_t   u64;
+      VertexPair pair;
+    };
+
     if(vtxA < vtxB)
     {
-      return vtxPair_t(vtxA) | (vtxPair_t(vtxB) << VTX_BITS);
+      pair.a = vtxA;
+      pair.b = vtxB;
     }
     else
     {
-      return vtxPair_t(vtxB) | (vtxPair_t(vtxA) << VTX_BITS);
+      pair.a = vtxB;
+      pair.b = vtxA;
     }
+
+    return u64;
   }
 
   struct Connectivity
@@ -344,7 +359,7 @@ public:
 
     uint32_t getVertex(uint32_t b) const { return b ? vtxB : vtxA; }
 
-    vtxPair_t getPair() const { return make_vtxPair(vtxA, vtxB); }
+    VertexPair getVertexPair() const { return {vtxA, vtxB}; }
   };
 
 
@@ -352,8 +367,10 @@ public:
   uint32_t numTriangles             = 0;
   uint32_t numEdges                 = 0;
   uint32_t freeNM                   = INVALID;
+  bool     requiresVertexTriangles  = false;
   bool     nonManifoldEdges         = false;
   bool     nonManifoldNeedsOrdering = false;
+  bool     hasOverlap               = false;
 
   uint32_t* triangles = nullptr;
 
@@ -366,7 +383,7 @@ public:
   Loader::TVector<Edge>   edges;
   Loader::TVector<EdgeNM> edgesNM;
 
-  std::unordered_map<vtxPair_t, uint32_t> lookupEdge;
+  std::unordered_map<edgeHash_t, uint32_t> lookupEdge;
 
   Loader* loader = nullptr;  // for debugging
 
@@ -375,7 +392,7 @@ public:
     numVertices = num;
     vtxEdges.resize(numVertices);
 
-    if(VTX_TRIS)
+    if(requiresVertexTriangles)
     {
       vtxTriangles.resize(numVertices);
     }
@@ -405,7 +422,7 @@ public:
 
   inline Edge* getEdge(uint32_t vtxA, uint32_t vtxB)
   {
-    const auto it = lookupEdge.find(make_vtxPair(vtxA, vtxB));
+    const auto it = lookupEdge.find(make_edgeHash(vtxA, vtxB));
     if(it != lookupEdge.cend())
     {
       return &edges[it->second];
@@ -415,7 +432,7 @@ public:
 
   inline const Edge* getEdge(uint32_t vtxA, uint32_t vtxB) const
   {
-    const auto it = lookupEdge.find(make_vtxPair(vtxA, vtxB));
+    const auto it = lookupEdge.find(make_edgeHash(vtxA, vtxB));
     if(it != lookupEdge.cend())
     {
       return &edges[it->second];
@@ -425,7 +442,7 @@ public:
 
   inline uint32_t getEdgeIdx(uint32_t vtxA, uint32_t vtxB) const
   {
-    const auto it = lookupEdge.find(make_vtxPair(vtxA, vtxB));
+    const auto it = lookupEdge.find(make_edgeHash(vtxA, vtxB));
     if(it != lookupEdge.cend())
     {
       return it->second;
@@ -436,6 +453,11 @@ public:
   inline uint32_t* getTriangle(uint32_t t) { return &triangles[t * 3]; }
 
   inline const uint32_t* getTriangle(uint32_t t) const { return &triangles[t * 3]; }
+
+  inline VertexPair getTriangleEdgeVertices(uint32_t t, uint32_t e) const
+  {
+    return {triangles[t * 3 + e], triangles[t * 3 + (e + 1) % 3]};
+  }
 
   inline void setTriSmoothAdjacency(uint32_t t, uint32_t e, uint32_t tOther)
   {
@@ -524,6 +546,33 @@ public:
 
     return vec_normalize(vec_cross((sides[corner]), (sides[(corner + 1) % 3])));
     //return vec_normalize(vec_cross(sides[0], vec_neg(sides[2])));
+  }
+
+  inline LdrVector getTriangleCross(uint32_t t, const LdrVector* positions) const
+  {
+    uint32_t idxA = triangles[t * 3 + 0];
+    uint32_t idxB = triangles[t * 3 + 1];
+    uint32_t idxC = triangles[t * 3 + 2];
+
+    LdrVector sides[3];
+    float     minAngle = FLT_MAX;
+    uint32_t  corner   = 0;
+
+    for(uint32_t i = 0; i < 3; i++)
+    {
+      sides[i] = vec_normalize(vec_sub(positions[triangles[t * 3 + i]], positions[triangles[t * 3 + (i + 1) % 3]]));
+    }
+    for(uint32_t i = 0; i < 3; i++)
+    {
+      float angle = fabsf(vec_dot(vec_neg(sides[i]), sides[(i + 1) % 3]));
+      if(angle < minAngle)
+      {
+        minAngle = angle;
+        corner   = i;
+      }
+    }
+
+    return vec_cross((sides[corner]), (sides[(corner + 1) % 3]));
   }
 
   inline const uint32_t getTriangleOtherVertex(uint32_t t, const Edge& edge) const
@@ -679,8 +728,8 @@ public:
     if(identicalNeighbor)
       return;
 
-    vtxPair_t pair = make_vtxPair(vtxA, vtxB);
-    auto      it   = lookupEdge.find(pair);
+    edgeHash_t edgeHash = make_edgeHash(vtxA, vtxB);
+    auto       it       = lookupEdge.find(edgeHash);
 
     if(it != lookupEdge.end())
     {
@@ -724,7 +773,7 @@ public:
       edge.nmList     = INVALID;
 
       edges.push_back(edge);
-      lookupEdge.insert({pair, edgeIdx});
+      lookupEdge.insert({edgeHash, edgeIdx});
 
       vtxEdges.add(vtxA, edgeIdx);
       vtxEdges.add(vtxB, edgeIdx);
@@ -736,8 +785,8 @@ public:
 
   inline void removeEdge(uint32_t vtxA, uint32_t vtxB, uint32_t tri)
   {
-    vtxPair_t pair = make_vtxPair(vtxA, vtxB);
-    auto      it   = lookupEdge.find(pair);
+    edgeHash_t edgeHash = make_edgeHash(vtxA, vtxB);
+    auto       it       = lookupEdge.find(edgeHash);
     if(it == lookupEdge.end())
       return;
 
@@ -764,7 +813,7 @@ public:
         vtxEdges.remove(edge.vtxA, it->second);
         vtxEdges.remove(edge.vtxB, it->second);
 
-        lookupEdge.erase(pair);
+        lookupEdge.erase(edgeHash);
       }
     }
     else
@@ -810,7 +859,7 @@ public:
         vtxEdges.remove(edge.vtxA, it->second);
         vtxEdges.remove(edge.vtxB, it->second);
 
-        lookupEdge.erase(pair);
+        lookupEdge.erase(edgeHash);
       }
     }
   }
@@ -832,7 +881,7 @@ public:
     addEdge(idxB, idxC, t, nonManifold, identicalNeighbor);
     addEdge(idxC, idxA, t, nonManifold, identicalNeighbor);
 
-    if(VTX_TRIS && !identicalNeighbor)
+    if(requiresVertexTriangles && !identicalNeighbor)
     {
       vtxTriangles.add(idxA, t);
       vtxTriangles.add(idxB, t);
@@ -864,7 +913,7 @@ public:
     removeEdge(idxB, idxC, t);
     removeEdge(idxC, idxA, t);
 
-    if(VTX_TRIS)
+    if(requiresVertexTriangles)
     {
       vtxTriangles.remove(idxA, t);
       vtxTriangles.remove(idxB, t);
@@ -897,6 +946,8 @@ public:
 
   bool initFull(uint32_t numV, uint32_t numT, uint32_t* tris, const LdrVector* positions, Loader* _loader)
   {
+    requiresVertexTriangles = true;
+
     bool nonManifold = false;
     initBasics(numV, numT, tris, _loader);
 
@@ -1104,8 +1155,6 @@ public:
   }
 };
 
-typedef TMesh<0> Mesh;
-typedef TMesh<1> MeshFull;
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -1114,14 +1163,18 @@ static const uint32_t EDGE_OPTIONAL_BIT     = 1 << 1;
 static const uint32_t EDGE_HARD_FLOATER_BIT = 1 << 2;
 static const uint32_t EDGE_MATERIAL_BIT     = 1 << 3;
 static const uint32_t EDGE_ANGLE_BIT        = 1 << 4;
+static const uint32_t EDGE_OVERLAP_BIT      = 1 << 5;
 
 // separate class due to potential template usage for Mesh
 class MeshUtils
 {
 public:
-  static void removeCoplanarTriangle(Mesh& mesh, Loader::BuilderPart& builder, const LdrVector& normal, uint32_t t, uint32_t tOther)
+  static void removeCoplanarTriangle(Mesh& mesh, Mesh::Edge& edge, Loader::BuilderPart& builder, const LdrVector& normal, uint32_t t, uint32_t tOther)
   {
-    if(mesh.triAlive.getBit(t) && (builder.isSameTriangle(t, tOther) || builder.isSameQuad(t, tOther)))
+    if(!mesh.triAlive.getBit(t))
+      return;
+
+    if((builder.isSameTriangle(t, tOther) || builder.isSameQuad(t, tOther)))
     {
       mesh.removeTriangle(t);
       return;
@@ -1133,6 +1186,8 @@ public:
 #if defined(_DEBUG) && LDR_DEBUG_PRINT_NON_MANIFOLDS
       printf("nonmanifold coplanar: t %d %d - %s\n", t, tOther, builder.filename.c_str());
 #endif
+      edge.flag |= EDGE_OVERLAP_BIT;
+      mesh.hasOverlap = true;
     }
   }
 
@@ -1146,7 +1201,7 @@ public:
     {
       uint32_t nonManifoldEdge = mesh.addTriangle(t);
 
-      if(t == 128)
+      if(t == 649)
         t = t;
 
       if(nonManifoldEdge != Mesh::INVALID)
@@ -1157,13 +1212,14 @@ public:
 
         if(edge.triLeft != t)
         {
-          removeCoplanarTriangle(mesh, builder, normal, t, edge.triLeft);
+          removeCoplanarTriangle(mesh, edge, builder, normal, t, edge.triLeft);
         }
 
         if(edge.triRight != Mesh::INVALID && edge.triRight != t)
         {
-          removeCoplanarTriangle(mesh, builder, normal, t, edge.triRight);
+          removeCoplanarTriangle(mesh, edge, builder, normal, t, edge.triRight);
         }
+
         if(edge.isNonManifold())
         {
           uint32_t numLeft = 0;
@@ -1175,7 +1231,7 @@ public:
             num++;
             if(tOther != t)
             {
-              removeCoplanarTriangle(mesh, builder, normal, t, tOther);
+              removeCoplanarTriangle(mesh, edge, builder, normal, t, tOther);
             }
           }
 
@@ -1336,6 +1392,125 @@ public:
     lines.move(newLines);
   }
 
+  struct TriangleRegion
+  {
+    Loader::TVector<float>     trianglesArea;
+    Loader::TVector<float>     trianglesConnectedArea;
+    Loader::TVector<uint32_t>  trianglesConnected;
+    Loader::TVector<LdrVector> trianglesNormals;
+    Loader::BitArray           trianglesVisited;
+
+    Loader::TVector<uint32_t> tempQueue;
+    uint32_t                  readPos  = 0;
+    uint32_t                  writePos = 0;
+
+    TriangleRegion(Mesh& mesh, Loader::BuilderPart& builder)
+    {
+      trianglesArea.resize(mesh.numTriangles, 0.0f);
+      trianglesConnectedArea.resize(mesh.numTriangles, 0.0f);
+      trianglesConnected.resize(mesh.numTriangles);
+      trianglesNormals.resize(mesh.numTriangles);
+      trianglesVisited.resize(mesh.numTriangles, false);
+
+      tempQueue.resize(mesh.numTriangles + 1);
+
+      for(uint32_t t = 0; t < mesh.numTriangles; t++)
+      {
+        trianglesConnected[t] = t;
+      }
+      for(uint32_t t = 0; t < mesh.numTriangles; t++)
+      {
+        float area;
+        trianglesNormals[t] = vec_normalize_length(mesh.getTriangleCross(t, builder.positions.data()), area);
+        trianglesArea[t]    = 0.5f * area;
+      }
+    }
+
+    void buildRegion(Mesh& mesh, Loader::BuilderPart& builder, uint32_t tSeed)
+    {
+      tempQueue[0] = tSeed;
+      readPos      = 0;
+      writePos     = 1;
+
+      trianglesVisited.setBit(tSeed, true);
+
+      while(readPos != writePos)
+      {
+        uint32_t t = tempQueue[readPos];
+
+        trianglesConnected[t] = tSeed;
+        trianglesConnectedArea[tSeed] += trianglesArea[t];
+
+        for(uint32_t e = 0; e < 3; e++)
+        {
+          Mesh::VertexPair  pair   = mesh.getTriangleEdgeVertices(t, e);
+          const Mesh::Edge* edge   = mesh.getEdge(pair.a, pair.b);
+          uint32_t          tOther = edge->otherTri(t);
+          if(edge->isNonManifold() || edge->isOpen() || trianglesVisited.getBit(tOther))  // || vec_dot(trianglesNormals[t], trianglesNormals[tOther]) <= Loader::COPLANAR_TRIANGLE_DOT
+            continue;
+
+          trianglesVisited.setBit(tOther, true);
+          tempQueue[writePos++] = edge->otherTri(t);
+        }
+
+        readPos++;
+      }
+    }
+  };
+
+  static void fixRegionOverlap(Mesh& mesh, Loader::BuilderPart& builder)
+  {
+    TriangleRegion   region(mesh, builder);
+    Loader::BitArray regionDelete(mesh.numTriangles, false);
+
+    for(uint32_t e = 0; e < mesh.numEdges; e++)
+    {
+      const Mesh::Edge& edge = mesh.edges[e];
+      if(!(edge.flag & EDGE_OVERLAP_BIT))
+        continue;
+
+      // find coplanar
+      uint32_t nextNM = edge.nmList;
+      while(nextNM != Mesh::INVALID)
+      {
+        const Mesh::EdgeNM* edgeNM = mesh.iterateEdgeNM(nextNM);
+        uint32_t            tA     = edgeNM->isLeft ? edge.triLeft : edge.triRight;
+        uint32_t            tB     = edgeNM->tri;
+
+        if(tA == 560 || tB == 560)
+          tA = tA;
+
+        if(tA != LDR_INVALID_IDX && vec_dot(region.trianglesNormals[tA], region.trianglesNormals[tB]) > Loader::COPLANAR_TRIANGLE_DOT)
+        {
+          // build connected region for tA and tB
+          if(!region.trianglesVisited.getBit(tA))
+          {
+            region.buildRegion(mesh, builder, tA);
+          }
+          if(!region.trianglesVisited.getBit(tB))
+          {
+            region.buildRegion(mesh, builder, tB);
+          }
+          if(region.trianglesConnected[tA] != region.trianglesConnected[tB])
+          {
+            // compare area
+            uint32_t tRegion = region.trianglesConnectedArea[region.trianglesConnected[tA]] > region.trianglesConnectedArea[region.trianglesConnected[tB]] ? tB : tA;
+            regionDelete.setBit(tRegion, true);
+          }
+        }
+      }
+    }
+
+    for(uint32_t t = 0; t < mesh.numTriangles; t++)
+    {
+      if(regionDelete.getBit(region.trianglesConnected[t]))
+      {
+        mesh.removeTriangle(t);
+      }
+    }
+
+    mesh.hasOverlap = false;
+  }
 
   static bool fixTjunctions(Mesh& mesh, Loader::BuilderPart& builder)
   {
@@ -1586,6 +1761,10 @@ public:
 
     MeshUtils::initLines(mesh, builder, false);
     MeshUtils::initLines(mesh, builder, true);
+    if(config.partFixOverlap && mesh.hasOverlap)
+    {
+      MeshUtils::fixRegionOverlap(mesh, builder);
+    }
     if(config.partFixTjunctions)
     {
       MeshUtils::fixTjunctions(mesh, builder);
@@ -1595,8 +1774,10 @@ public:
     MeshUtils::removeDeleted(mesh, builder);
   }
 
-  static void chamferRenderPart(MeshFull& mesh, Loader::BuilderRenderPart& builder, const LdrPart& part, const float chamferPreferred)
+  static void chamferRenderPart(Mesh& mesh, Loader::BuilderRenderPart& builder, const LdrPart& part, const float chamferPreferred)
   {
+    assert(mesh.requiresVertexTriangles);
+
     // copy over original triangles first
     Loader::TVector<uint32_t> renderTriangles = builder.triangles;
     builder.trianglesC                        = builder.triangles;
@@ -1638,7 +1819,7 @@ public:
 
         for(uint32_t e = 0; e < edgeCount; e++)
         {
-          const MeshFull::Edge edge = mesh.edges[edgeIndices[e]];
+          const Mesh::Edge edge = mesh.edges[edgeIndices[e]];
           dist = std::min(dist, vec_sq_length(vec_sub(part.positions[edge.vtxA], part.positions[edge.vtxB])));
         }
         const float chamferDistance = std::min(chamferPreferred, dist * 0.40f);
@@ -1654,10 +1835,10 @@ public:
 
           const Loader::BuilderRenderPart::EdgePair& edgePair = builder.vtxOutEdgePairs[outInfo.begin + o];
           // get the two edges that define the triangle cluster for this output vertex
-          const MeshFull::Edge& edgeA = mesh.edges[edgePair.edge[0]];
-          const MeshFull::Edge& edgeB = mesh.edges[edgePair.edge[1]];
-          uint32_t              tri   = edgePair.tri[0];
-          materialTri                 = tri;
+          const Mesh::Edge& edgeA = mesh.edges[edgePair.edge[0]];
+          const Mesh::Edge& edgeB = mesh.edges[edgePair.edge[1]];
+          uint32_t          tri   = edgePair.tri[0];
+          materialTri             = tri;
 
           // algorithm described by Diana Algma https://github.com/dianx93
           // https://comserv.cs.ut.ee/home/files/Algma_ComputerScience_2018.pdf?study=ATILoputoo&reference=D4FE5BC8A22718CF3A52B308AD2B2B878C78EB36
@@ -1841,14 +2022,14 @@ public:
     // second pass is to create new triangles for every hard edge
     for(uint32_t e = 0; e < mesh.numEdges; e++)
     {
-      const MeshFull::Edge& edge = mesh.edges[e];
+      const Mesh::Edge& edge = mesh.edges[e];
 
       if(edge.isOpen() || !(edge.flag & (EDGE_ANGLE_BIT | EDGE_HARD_BIT)))
         continue;
 
-      uint32_t triLeft  = MeshFull::INVALID;
-      uint32_t triRight = MeshFull::INVALID;
-      uint32_t nmList   = MeshFull::INVALID;
+      uint32_t triLeft  = Mesh::INVALID;
+      uint32_t triRight = Mesh::INVALID;
+      uint32_t nmList   = Mesh::INVALID;
 
       while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight))
       {
@@ -1932,8 +2113,10 @@ public:
     return vertex;
   }
 
-  static void buildRenderPartBasic(Loader::BuilderRenderPart& builder, MeshFull& mesh, const LdrPart& part, const Loader::Config& config)
+  static void buildRenderPartBasic(Loader::BuilderRenderPart& builder, Mesh& mesh, const LdrPart& part, const Loader::Config& config)
   {
+    assert(mesh.requiresVertexTriangles);
+
     // start with unique vertices per triangle
 
     builder.vertices.resize(mesh.numTriangles * 3);
@@ -1958,14 +2141,14 @@ public:
     for(uint32_t e = 0; e < mesh.numEdges; e++)
     {
 
-      MeshFull::Edge& edge = mesh.edges[e];
+      Mesh::Edge& edge = mesh.edges[e];
 
       if(edge.isOpen())
         continue;
 
-      uint32_t triLeft  = MeshFull::INVALID;
-      uint32_t triRight = MeshFull::INVALID;
-      uint32_t nmList   = MeshFull::INVALID;
+      uint32_t triLeft  = Mesh::INVALID;
+      uint32_t triRight = Mesh::INVALID;
+      uint32_t nmList   = Mesh::INVALID;
 
       while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight))
       {
@@ -2025,8 +2208,8 @@ public:
               uint32_t triEdge                   = outgoing ? triVtx : (3 + triVtx - 1) % 3;
               triangleVertices[tri * 3 + triVtx] = rvtx;
 
-              MeshFull::TriAdjacency triAdjacency = mesh.triAdjacencies[tri];
-              uint32_t               newTri       = triAdjacency.edgeSmoothTri[triEdge];
+              Mesh::TriAdjacency triAdjacency = mesh.triAdjacencies[tri];
+              uint32_t           newTri       = triAdjacency.edgeSmoothTri[triEdge];
               assert(tri != newTri);
               tri = newTri;
               if(tri == triRight)
@@ -2046,15 +2229,14 @@ public:
     {
       for(uint32_t e = 0; e < mesh.numEdges; e++)
       {
-
-        const MeshFull::Edge& edge = mesh.edges[e];
+        const Mesh::Edge& edge = mesh.edges[e];
 
         if(edge.isOpen() || (edge.flag & EDGE_HARD_BIT))
           continue;
 
-        uint32_t triLeft  = MeshFull::INVALID;
-        uint32_t triRight = MeshFull::INVALID;
-        uint32_t nmList   = MeshFull::INVALID;
+        uint32_t triLeft  = Mesh::INVALID;
+        uint32_t triRight = Mesh::INVALID;
+        uint32_t nmList   = Mesh::INVALID;
 
         while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight))
         {
@@ -2209,8 +2391,8 @@ public:
               pair.tri[s]      = tri;
               pairTriEdge[s]   = triEdge;
 
-              MeshFull::TriAdjacency triAdjacency = mesh.triAdjacencies[tri];
-              uint32_t               newTri       = triAdjacency.edgeSmoothTri[triEdge];
+              Mesh::TriAdjacency triAdjacency = mesh.triAdjacencies[tri];
+              uint32_t           newTri       = triAdjacency.edgeSmoothTri[triEdge];
               assert(tri != newTri);
               tri = newTri;
               if(tri == firstTri)
@@ -2347,7 +2529,7 @@ public:
     builder.bbox = part.bbox;
     builder.flag = part.flag;
 
-    MeshFull mesh;
+    Mesh mesh;
     mesh.initFull(part.num_positions, part.num_triangles, part.triangles, part.positions, builder.loader);
 
     builder.vertices.reserve(part.num_positions + part.num_lines * 2);
@@ -2364,7 +2546,7 @@ public:
     // push "hard" lines
     for(uint32_t i = 0; i < part.num_lines; i++)
     {
-      MeshFull::Edge* edge = mesh.getEdge(part.lines[i * 2 + 0], part.lines[i * 2 + 1]);
+      Mesh::Edge* edge = mesh.getEdge(part.lines[i * 2 + 0], part.lines[i * 2 + 1]);
       if(edge)
       {
         edge->flag |= EDGE_HARD_BIT;
@@ -4577,6 +4759,7 @@ LDR_API void ldrGetDefaultCreateInfo(LdrLoaderCreateInfo* info)
   info->partHiResPrimitives = LDR_FALSE;
   info->partFixMode         = LDR_PART_FIX_NONE;
   info->partFixTjunctions   = LDR_TRUE;
+  info->partFixOverlap      = LDR_FALSE;
   info->renderpartBuildMode = LDR_RENDERPART_BUILD_ONLOAD;
   info->renderpartChamfer   = 0.35f;
   //info->renderpartTriangleMaterials = LDR_TRUE;
