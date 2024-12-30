@@ -199,7 +199,7 @@ inline void bbox_merge(LdrBbox& bbox, const LdrMatrix& transform, const LdrBbox 
 
 //////////////////////////////////////////////////////////////////////////
 
-const float Loader::COPLANAR_TRIANGLE_DOT = 0.99f;
+const float Loader::COPLANAR_TRIANGLE_DOT = 0.998f;  // around 3 degrees
 const float Loader::NO_AREA_TRIANGLE_DOT  = 0.9999f;
 const float Loader::FORCED_HARD_EDGE_DOT  = 0.2f;
 const float Loader::CHAMFER_PARALLEL_DOT  = 0.999f;
@@ -555,24 +555,18 @@ public:
     uint32_t idxC = triangles[t * 3 + 2];
 
     LdrVector sides[3];
-    float     minAngle = FLT_MAX;
-    uint32_t  corner   = 0;
+    LdrVector cross = {0.0f,0.0f,0.0f};
 
     for(uint32_t i = 0; i < 3; i++)
     {
-      sides[i] = vec_normalize(vec_sub(positions[triangles[t * 3 + i]], positions[triangles[t * 3 + (i + 1) % 3]]));
+      sides[i] = (vec_sub(positions[triangles[t * 3 + i]], positions[triangles[t * 3 + (i + 1) % 3]]));
     }
     for(uint32_t i = 0; i < 3; i++)
     {
-      float angle = fabsf(vec_dot(vec_neg(sides[i]), sides[(i + 1) % 3]));
-      if(angle < minAngle)
-      {
-        minAngle = angle;
-        corner   = i;
-      }
+      cross = vec_add(cross, vec_cross((sides[i]), (sides[(i + 1) % 3])));
     }
 
-    return vec_cross((sides[corner]), (sides[(corner + 1) % 3]));
+    return vec_mul(cross,1.0f/3.0f);
   }
 
   inline const uint32_t getTriangleOtherVertex(uint32_t t, const Edge& edge) const
@@ -1446,11 +1440,14 @@ public:
           Mesh::VertexPair  pair   = mesh.getTriangleEdgeVertices(t, e);
           const Mesh::Edge* edge   = mesh.getEdge(pair.a, pair.b);
           uint32_t          tOther = edge->otherTri(t);
-          if(edge->isNonManifold() || edge->isOpen() || trianglesVisited.getBit(tOther))  // || vec_dot(trianglesNormals[t], trianglesNormals[tOther]) <= Loader::COPLANAR_TRIANGLE_DOT
+          if(edge->isNonManifold() || edge->isOpen() || trianglesVisited.getBit(tOther)
+             || vec_dot(trianglesNormals[t], trianglesNormals[tOther]) <= Loader::COPLANAR_TRIANGLE_DOT)
+          {
             continue;
+          }
 
           trianglesVisited.setBit(tOther, true);
-          tempQueue[writePos++] = edge->otherTri(t);
+          tempQueue[writePos++] = tOther;
         }
 
         readPos++;
@@ -1477,7 +1474,7 @@ public:
         uint32_t            tA     = edgeNM->isLeft ? edge.triLeft : edge.triRight;
         uint32_t            tB     = edgeNM->tri;
 
-        if(tA == 560 || tB == 560)
+        if(tA == 792 || tB == 792)
           tA = tA;
 
         if(tA != LDR_INVALID_IDX && vec_dot(region.trianglesNormals[tA], region.trianglesNormals[tB]) > Loader::COPLANAR_TRIANGLE_DOT)
@@ -1494,7 +1491,10 @@ public:
           if(region.trianglesConnected[tA] != region.trianglesConnected[tB])
           {
             // compare area
-            uint32_t tRegion = region.trianglesConnectedArea[region.trianglesConnected[tA]] > region.trianglesConnectedArea[region.trianglesConnected[tB]] ? tB : tA;
+            uint32_t tRegion = region.trianglesConnectedArea[region.trianglesConnected[tA]]
+                                       > region.trianglesConnectedArea[region.trianglesConnected[tB]] ?
+                                   tB :
+                                   tA;
             regionDelete.setBit(tRegion, true);
           }
         }
