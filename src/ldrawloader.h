@@ -246,6 +246,12 @@ typedef struct LdrPartFlag
   uint32_t hasFixErrors : 1;
 } LdrPartFlag;
 
+typedef struct LdrNgon
+{
+  uint32_t index;
+  uint32_t num;
+} LdrNgon;
+
 
 // LdrShapes are expressed procedurally by the user of the library.
 // Register shape types to do part/primitive replacement.
@@ -289,21 +295,21 @@ typedef struct LdrPart
   LdrBbox     bbox;
   float       minEdgeLength;
 
-  uint32_t num_positions;
-  uint32_t num_lines;
-  uint32_t num_optional_lines;
-  uint32_t num_triangles;
-  uint32_t num_shapes;
-  uint32_t num_instances;
-  uint32_t num_name;
+  uint32_t numPositions;
+  uint32_t numLines;
+  uint32_t numOptionalLines;
+  uint32_t numTriangles;
+  uint32_t numShapes;
+  uint32_t numInstances;
+  uint32_t numName;
 
   // all pointers are within raw
   LdrVector* LDR_RESTRICT      positions;
   LdrVertexIndex* LDR_RESTRICT lines;
   LdrVertexIndex* LDR_RESTRICT optional_lines;
   LdrVertexIndex* LDR_RESTRICT triangles;
-  LdrMaterialID* LDR_RESTRICT  materials;
-  uint32_t* LDR_RESTRICT       quads;  // per-traingle, if != ~0 means index of starting triangle
+  LdrMaterialID* LDR_RESTRICT  triangleMaterials;
+  LdrNgon* LDR_RESTRICT        triangleNgons;
   LdrShape* LDR_RESTRICT       shapes;
   LdrInstance* LDR_RESTRICT    instances;  // sub-parts
   char* LDR_RESTRICT           name;
@@ -316,7 +322,7 @@ typedef struct LdrPart
 
 typedef struct LdrModel
 {
-  uint32_t num_instances;
+  uint32_t numInstances;
   LdrBbox  bbox;
 
   // all pointers are within raw
@@ -353,11 +359,11 @@ typedef struct LdrRenderPart
   LdrPartFlag flag;
   LdrBbox     bbox;
 
-  uint32_t num_vertices;
-  uint32_t num_lines;
-  uint32_t num_triangles;
-  uint32_t num_trianglesC;
-  uint32_t num_shapes;
+  uint32_t numVertices;
+  uint32_t numLines;
+  uint32_t numTriangles;
+  uint32_t numTrianglesC;
+  uint32_t numShapes;
 
   // all pointers are within raw
   LdrRenderVertex* LDR_RESTRICT vertices;
@@ -365,7 +371,7 @@ typedef struct LdrRenderPart
   //LdrVertexIndex* LDR_RESTRICT  linesC; // TODO
   LdrVertexIndex* LDR_RESTRICT triangles;
   LdrVertexIndex* LDR_RESTRICT trianglesC;
-  LdrMaterialID* LDR_RESTRICT  materials;
+  LdrMaterialID* LDR_RESTRICT  triangleMaterials;
   LdrMaterialID* LDR_RESTRICT  materialsC;
   LdrShape* LDR_RESTRICT       shapes;
 
@@ -386,7 +392,7 @@ typedef struct LdrRenderInstance
 
 typedef struct LdrRenderModel
 {
-  uint32_t num_instances;
+  uint32_t numInstances;
   LdrBbox  bbox;
 
   // all pointers are within raw

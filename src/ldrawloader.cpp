@@ -520,6 +520,7 @@ public:
     return true;
   }
 
+  // find cross product of vectors with widest angle
   inline LdrVector getTriangleNormal(uint32_t t, const LdrVector* positions) const
   {
     uint32_t idxA = triangles[t * 3 + 0];
@@ -548,6 +549,14 @@ public:
     //return vec_normalize(vec_cross(sides[0], vec_neg(sides[2])));
   }
 
+  inline void getTriangleBasis(uint32_t t, const LdrVector* positions, LdrVector basis[3]) const
+  {
+    basis[0] = vec_normalize(vec_sub(positions[triangles[t * 3 + 0]], positions[triangles[t * 3 + 1]]));
+    basis[2] = getTriangleNormal(t, positions);
+    basis[1] = vec_normalize(vec_cross(basis[0], basis[2]));
+  }
+
+  // average of the 3 normals
   inline LdrVector getTriangleCross(uint32_t t, const LdrVector* positions) const
   {
     uint32_t idxA = triangles[t * 3 + 0];
@@ -555,7 +564,7 @@ public:
     uint32_t idxC = triangles[t * 3 + 2];
 
     LdrVector sides[3];
-    LdrVector cross = {0.0f,0.0f,0.0f};
+    LdrVector cross = {0.0f, 0.0f, 0.0f};
 
     for(uint32_t i = 0; i < 3; i++)
     {
@@ -566,7 +575,7 @@ public:
       cross = vec_add(cross, vec_cross((sides[i]), (sides[(i + 1) % 3])));
     }
 
-    return vec_mul(cross,1.0f/3.0f);
+    return vec_mul(cross, 1.0f / 3.0f);
   }
 
   inline const uint32_t getTriangleOtherVertex(uint32_t t, const Edge& edge) const
@@ -606,6 +615,21 @@ public:
       indices[1] = newVtx;
     if(indices[2] == vtx)
       indices[2] = newVtx;
+  }
+
+  inline uint32_t findTriangleConnectingVertices(uint32_t tA, uint32_t tB, uint32_t* verts) const
+  {
+    const uint32_t* indices = getTriangle(tA);
+
+    uint32_t num = 0;
+    if(findTriangleVertex(tB, indices[0]) != INVALID)
+      verts[num++] = indices[0];
+    if(findTriangleVertex(tB, indices[1]) != INVALID)
+      verts[num++] = indices[1];
+    if(findTriangleVertex(tB, indices[2]) != INVALID)
+      verts[num++] = indices[2];
+
+    return num;
   }
 
   uint32_t addEdgeNM(uint32_t startNM, uint32_t tri, bool isLeft, bool& identicalNeighbor)
@@ -1185,7 +1209,7 @@ public:
     }
   }
 
-  static void initMesh(Mesh& mesh, Loader::BuilderPart& builder)
+  static void fillTriangles(Mesh& mesh, Loader::BuilderPart& builder)
   {
     uint32_t numT = builder.triangles.size() / 3;
     uint32_t numV = builder.positions.size();
@@ -1194,9 +1218,6 @@ public:
     for(uint32_t t = 0; t < numT; t++)
     {
       uint32_t nonManifoldEdge = mesh.addTriangle(t);
-
-      if(t == 649)
-        t = t;
 
       if(nonManifoldEdge != Mesh::INVALID)
       {
@@ -1252,17 +1273,18 @@ public:
         builder.triangles[write * 3 + 0] = builder.triangles[t * 3 + 0];
         builder.triangles[write * 3 + 1] = builder.triangles[t * 3 + 1];
         builder.triangles[write * 3 + 2] = builder.triangles[t * 3 + 2];
-        builder.materials[write]         = builder.materials[t];
+        builder.triangleMaterials[write] = builder.triangleMaterials[t];
         remap[t]                         = write;
-        uint32_t quadIndex               = builder.quads[t];
-        builder.quads[write]             = quadIndex != LDR_INVALID_IDX ? remap[quadIndex] : quadIndex;
+        LdrNgon ngon                     = builder.triangleNgons[t];
+        ngon.index                       = remap[ngon.index];
+        builder.triangleNgons[write]     = ngon;
         write++;
       }
     }
 
     builder.triangles.resize(write * 3);
-    builder.materials.resize(write);
-    builder.quads.resize(write);
+    builder.triangleMaterials.resize(write);
+    builder.triangleNgons.resize(write);
   }
 
   static void storeEdgeLines(Mesh& mesh, Loader::BuilderPart& builder, bool optional)
@@ -1280,7 +1302,7 @@ public:
       }
     }
   }
-  static void initLines(Mesh& mesh, Loader::BuilderPart& builder, bool optional)
+  static void fillLines(Mesh& mesh, Loader::BuilderPart& builder, bool optional)
   {
     Loader::TVector<uint32_t> path;
     path.reserve(16);
@@ -1386,7 +1408,7 @@ public:
     lines.move(newLines);
   }
 
-  struct TriangleRegion
+  struct CoplanarTriangleRegions
   {
     Loader::TVector<float>     trianglesArea;
     Loader::TVector<float>     trianglesConnectedArea;
@@ -1398,7 +1420,7 @@ public:
     uint32_t                  readPos  = 0;
     uint32_t                  writePos = 0;
 
-    TriangleRegion(Mesh& mesh, Loader::BuilderPart& builder)
+    CoplanarTriangleRegions(Mesh& mesh, Loader::BuilderPart& builder)
     {
       trianglesArea.resize(mesh.numTriangles, 0.0f);
       trianglesConnectedArea.resize(mesh.numTriangles, 0.0f);
@@ -1457,8 +1479,8 @@ public:
 
   static void fixRegionOverlap(Mesh& mesh, Loader::BuilderPart& builder)
   {
-    TriangleRegion   region(mesh, builder);
-    Loader::BitArray regionDelete(mesh.numTriangles, false);
+    CoplanarTriangleRegions regions(mesh, builder);
+    Loader::BitArray        regionsDelete(mesh.numTriangles, false);
 
     for(uint32_t e = 0; e < mesh.numEdges; e++)
     {
@@ -1474,28 +1496,25 @@ public:
         uint32_t            tA     = edgeNM->isLeft ? edge.triLeft : edge.triRight;
         uint32_t            tB     = edgeNM->tri;
 
-        if(tA == 792 || tB == 792)
-          tA = tA;
-
-        if(tA != LDR_INVALID_IDX && vec_dot(region.trianglesNormals[tA], region.trianglesNormals[tB]) > Loader::COPLANAR_TRIANGLE_DOT)
+        if(tA != LDR_INVALID_IDX && vec_dot(regions.trianglesNormals[tA], regions.trianglesNormals[tB]) > Loader::COPLANAR_TRIANGLE_DOT)
         {
           // build connected region for tA and tB
-          if(!region.trianglesVisited.getBit(tA))
+          if(!regions.trianglesVisited.getBit(tA))
           {
-            region.buildRegion(mesh, builder, tA);
+            regions.buildRegion(mesh, builder, tA);
           }
-          if(!region.trianglesVisited.getBit(tB))
+          if(!regions.trianglesVisited.getBit(tB))
           {
-            region.buildRegion(mesh, builder, tB);
+            regions.buildRegion(mesh, builder, tB);
           }
-          if(region.trianglesConnected[tA] != region.trianglesConnected[tB])
+          if(regions.trianglesConnected[tA] != regions.trianglesConnected[tB])
           {
             // compare area
-            uint32_t tRegion = region.trianglesConnectedArea[region.trianglesConnected[tA]]
-                                       > region.trianglesConnectedArea[region.trianglesConnected[tB]] ?
+            uint32_t tRegion = regions.trianglesConnectedArea[regions.trianglesConnected[tA]]
+                                       > regions.trianglesConnectedArea[regions.trianglesConnected[tB]] ?
                                    tB :
                                    tA;
-            regionDelete.setBit(tRegion, true);
+            regionsDelete.setBit(tRegion, true);
           }
         }
       }
@@ -1503,7 +1522,7 @@ public:
 
     for(uint32_t t = 0; t < mesh.numTriangles; t++)
     {
-      if(regionDelete.getBit(region.trianglesConnected[t]))
+      if(regionsDelete.getBit(regions.trianglesConnected[t]))
       {
         mesh.removeTriangle(t);
       }
@@ -1512,16 +1531,212 @@ public:
     mesh.hasOverlap = false;
   }
 
+  struct NgonTriangulation
+  {
+    // https://www.flipcode.com/archives/Efficient_Polygon_Triangulation.shtml
+
+    uint32_t                   numOutlineVertices = 0;
+    Loader::TVector<uint32_t>  workingSet;
+    Loader::TVector<LdrVector> outlineVertices;
+    Loader::TVector<uint32_t>  triangleVertices;
+    LdrVector                  basis[3];
+
+    inline bool isInsideTriangle(LdrVector a, LdrVector b, LdrVector c, LdrVector p)
+    {
+      LdrVector bc = vec_sub(c, b);
+      LdrVector ca = vec_sub(a, c);
+      LdrVector ab = vec_sub(b, a);
+
+      LdrVector ap = vec_sub(p, a);
+      LdrVector bp = vec_sub(p, b);
+      LdrVector cp = vec_sub(p, c);
+
+      float aCROSSbp = bc.x * bp.y - bc.y * bp.x;
+      float cCROSSap = ab.x * ap.y - ab.y * ap.x;
+      float bCROSScp = ca.x * cp.y - ca.y * cp.x;
+
+      return ((aCROSSbp >= 0.0f) && (bCROSScp >= 0.0f) && (cCROSSap >= 0.0f));
+    }
+
+    inline LdrVector makeOutlineVertex(const Loader::BuilderPart& builder, uint32_t i)
+    {
+      LdrVector pos = builder.positions[i];
+      LdrVector projected;
+      projected.x = vec_dot(basis[0], pos);
+      projected.y = vec_dot(basis[1], pos);
+      projected.z = 0.0f;
+
+      return projected;
+    }
+
+    inline bool snip(const Loader::BuilderPart& builder, int32_t u, int32_t v, int32_t w, int32_t numPoints)
+    {
+      LdrVector a = outlineVertices[workingSet[u]];
+      LdrVector b = outlineVertices[workingSet[v]];
+      LdrVector c = outlineVertices[workingSet[w]];
+
+      if(0.0000000001f > (((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x))))
+        return false;
+
+      for(int32_t op = 0; op < numPoints; op++)
+      {
+        if((op == u) || (op == v) || (op == w))
+          continue;
+
+        LdrVector p = outlineVertices[workingSet[op]];
+
+        if(isInsideTriangle(a, b, c, p))
+          return false;
+      }
+
+      return true;
+    }
+
+    void build(Mesh& mesh, Loader::BuilderPart& builder, uint32_t triSeed, const uint32_t* triangleLinkedList)
+    {
+      uint32_t numTriangles = builder.triangleNgons[triSeed].num;
+
+      numOutlineVertices = numTriangles + 2;
+
+      workingSet.clear();
+      workingSet.reserve(numTriangles + 2);
+      triangleVertices.clear();
+      triangleVertices.reserve(numTriangles * 3);
+
+      mesh.getTriangleBasis(triSeed, builder.positions.data(), basis);
+
+      // build initial outline
+      uint32_t triLast = triSeed;
+      uint32_t tri     = triangleLinkedList[triSeed];
+      for(uint32_t t = 0; t < numTriangles; t++)
+      {
+        assert(tri != LDR_INVALID_IDX);
+
+        uint32_t connectedVerticesLast[3];
+        uint32_t numVerticesLast = mesh.findTriangleConnectingVertices(tri, triLast, connectedVerticesLast);
+
+
+        triLast = tri;
+        tri     = triangleLinkedList[tri];
+      }
+      assert(tri == triSeed || tri == LDR_INVALID_IDX);
+
+      outlineVertices.resize(numTriangles + 2);
+
+      for(uint32_t v = 0; v < numOutlineVertices; v++)
+      {
+        outlineVertices[v] = makeOutlineVertex(builder, workingSet[v]);
+      }
+
+      // build new triangles
+      {
+        int32_t nv    = int32_t(numOutlineVertices);
+        int32_t count = int32_t(2 * numOutlineVertices);
+
+        for(int32_t m = 0, v = nv - 1; nv > 2;)
+        {
+          if(0 >= (count--))
+          {
+            return;
+          }
+
+          int32_t u = v;
+          if(nv <= u)
+          {
+            u = 0;
+          }
+          v = u + 1;
+          if(nv <= v)
+          {
+            v = 0;
+          }
+          int32_t w = v + 1;
+          if(nv <= w)
+          {
+            w = 0;
+          }
+          if(snip(builder, u, v, w, nv))
+          {
+            uint32_t a = workingSet[u];
+            uint32_t b = workingSet[v];
+            uint32_t c = workingSet[w];
+
+            triangleVertices.push_back(a);
+            triangleVertices.push_back(b);
+            triangleVertices.push_back(c);
+
+            m++;
+
+            int32_t s;
+            int32_t t;
+            for(s = v, t = v + 1; t < nv; s++, t++)
+            {
+              workingSet[s] = workingSet[t];
+            }
+            nv--;
+
+            count = 2 * nv;
+          }
+        }
+      }
+
+      // replace triangles of linked list with new ones
+      if(triangleVertices.size() == numTriangles)
+      {
+        // remove all
+        tri = triSeed;
+        for(uint32_t t = 0; t < numTriangles; t++)
+        {
+          assert(tri != LDR_INVALID_IDX);
+
+          // don't flag dead given we will re-add with new topology
+          mesh.removeTriangle(tri, false);
+
+          tri = triangleLinkedList[tri];
+        }
+        assert(tri == triSeed || tri == LDR_INVALID_IDX);
+
+        // add all
+        tri = triSeed;
+        for(uint32_t t = 0; t < numTriangles; t++)
+        {
+          assert(tri != LDR_INVALID_IDX);
+
+          // replace with new indices
+          builder.triangles[tri * 3 + 0] = triangleVertices[t * 3 + 0];
+          builder.triangles[tri * 3 + 1] = triangleVertices[t * 3 + 1];
+          builder.triangles[tri * 3 + 2] = triangleVertices[t * 3 + 2];
+
+          // add back
+          mesh.addTriangle(tri);
+
+          tri = triangleLinkedList[tri];
+        }
+      }
+    }
+  };
+
   static bool fixTjunctions(Mesh& mesh, Loader::BuilderPart& builder)
   {
     bool modified = false;
 
     // removes t-junctions and closable gaps
-    //builder.flag.canChamfer = 1;
 
     uint32_t numVertices = (uint32_t)builder.positions.size();
 
     Loader::BitArray processed(mesh.edges.size(), false);
+
+    Loader::TVector<uint32_t> triangleNgonList(mesh.numTriangles, LDR_INVALID_IDX);
+
+    for(uint32_t t = 0; t < mesh.numTriangles; t++)
+    {
+      LdrNgon ngon = builder.triangleNgons[t];
+      if(ngon.index != t)
+      {
+        triangleNgonList[t]          = LDR_INVALID_IDX;
+        triangleNgonList[ngon.index] = t;
+      }
+    }
 
     for(uint32_t v = 0; v < numVertices; v++)
     {
@@ -1667,29 +1882,16 @@ public:
 
         mesh.removeTriangle(triOld);
 
-        uint32_t quadOld = builder.quads[triOld];
-        if(quadOld != LDR_INVALID_IDX)
-        {
-          builder.quads[quadOld] = LDR_INVALID_IDX;
-          builder.quads[triOld]  = LDR_INVALID_IDX;
-        }
-
-        // FIXME if triOld is quad, then try to distribute new edges on both opposite vertices (A,B)
-        //
-        //    A___B
-        //    |\ /|
-        //    x_x_x
-        //
-        //    instead of all new triangles within a single triangle only (only A)
-        //
-        //    A___B
-        //    |\  |
-        //    |\\ |
-        //    x_x_x
-
+        LdrNgon ngon = builder.triangleNgons[triOld];
+        // append newly added
+        ngon.num += uint32_t(path.size()) - 1;
+        builder.triangleNgons[ngon.index] = ngon;
+        builder.triangleNgons[triOld]     = ngon;
 
         uint32_t flagPath = edgeA.flag;
         uint32_t vFirst   = edgeA.vtxA;
+
+        uint32_t lastTri = triOld;
 
         for(size_t i = 0; i < path.size(); i++)
         {
@@ -1708,8 +1910,14 @@ public:
             builder.triangles.push_back(vFirst);
             builder.triangles.push_back(edgeC.otherVertex(vFirst));
             builder.triangles.push_back(vCorner);
-            builder.materials.push_back(builder.materials[triOld]);
-            builder.quads.push_back(LDR_INVALID_IDX);
+            builder.triangleMaterials.push_back(builder.triangleMaterials[triOld]);
+            builder.triangleNgons.push_back(ngon);
+
+            // append to ngon list
+            triangleNgonList[triIdx]  = triangleNgonList[lastTri];
+            triangleNgonList[lastTri] = triIdx;
+
+            lastTri = triIdx;
           }
           else
           {
@@ -1722,12 +1930,7 @@ public:
           mesh.triangles = builder.triangles.data();
 
           uint32_t nonManifold = mesh.addTriangle(triIdx);
-          if(nonManifold != Mesh::INVALID)
-          {
-            //builder.flag.canChamfer = 0;
-          }
-
-          vFirst = edgeC.otherVertex(vFirst);
+          vFirst               = edgeC.otherVertex(vFirst);
         }
 
         // re-apply edge flag
@@ -1747,6 +1950,18 @@ public:
       }
     }
 
+#if 0
+    NgonTriangulation ngonTriangulation;
+    for(uint32_t t = 0; t < mesh.numTriangles; t++)
+    {
+      LdrNgon ngon = builder.triangleNgons[t];
+      if(ngon.num <= 2 || ngon.index != t)
+        continue;
+      // rebuild triangulation of ngons
+
+      ngonTriangulation.build(mesh, builder, t, triangleNgonList.data());
+    }
+#endif
     return modified;
   }
 
@@ -1757,10 +1972,10 @@ public:
 
     builder.flag.canChamfer = 1;
 
-    MeshUtils::initMesh(mesh, builder);
+    MeshUtils::fillTriangles(mesh, builder);
 
-    MeshUtils::initLines(mesh, builder, false);
-    MeshUtils::initLines(mesh, builder, true);
+    MeshUtils::fillLines(mesh, builder, false);
+    MeshUtils::fillLines(mesh, builder, true);
     if(config.partFixOverlap && mesh.hasOverlap)
     {
       MeshUtils::fixRegionOverlap(mesh, builder);
@@ -1781,13 +1996,13 @@ public:
     // copy over original triangles first
     Loader::TVector<uint32_t> renderTriangles = builder.triangles;
     builder.trianglesC                        = builder.triangles;
-    builder.materialsC.resize(part.flag.hasComplexMaterial ? part.num_triangles : 0);
+    builder.materialsC.resize(part.flag.hasComplexMaterial ? part.numTriangles : 0);
 
     bool hasMaterials = !builder.materialsC.empty();
 
     if(hasMaterials)
     {
-      memcpy(builder.materialsC.data(), part.materials, sizeof(LdrMaterialID) * part.num_triangles);
+      memcpy(builder.materialsC.data(), part.triangleMaterials, sizeof(LdrMaterialID) * part.numTriangles);
     }
 
     // all vertices that were split before to account for hard edges are relevant here
@@ -1797,9 +2012,9 @@ public:
     // one vertex per every split vertex
 
     // store where the chamfered begin
-    Loader::TVector<uint32_t> vtxChamferBegin(part.num_positions, 0);
+    Loader::TVector<uint32_t> vtxChamferBegin(part.numPositions, 0);
 
-    for(uint32_t v = 0; v < part.num_positions; v++)
+    for(uint32_t v = 0; v < part.numPositions; v++)
     {
       Loader::BuilderRenderPart::VertexInfo outInfo  = builder.vtxOutInfo[v];
       uint32_t                              outCount = outInfo.count;
@@ -2010,7 +2225,7 @@ public:
 
             if(hasMaterials)
             {
-              builder.materialsC.push_back(part.materials[materialTri]);
+              builder.materialsC.push_back(part.triangleMaterials[materialTri]);
             }
           }
 
@@ -2085,7 +2300,7 @@ public:
 
           if(hasMaterials)
           {
-            builder.materialsC.push_back(part.materials[triLeft]);
+            builder.materialsC.push_back(part.triangleMaterials[triLeft]);
           }
           builder.trianglesC.push_back(a);
           builder.trianglesC.push_back(b);
@@ -2130,12 +2345,12 @@ public:
         triangleVertices[t * 3 + k]          = t * 3 + k;
         builder.vertices[t * 3 + k].position = part.positions[mesh.triangles[t * 3 + k]];
         builder.vertices[t * 3 + k].normal   = builder.triNormals[t];
-        builder.vertices[t * 3 + k].material = part.materials ? part.materials[t] : LDR_MATERIALID_INHERIT;
-        builder.vertices[t * 3 + k]._pad     = 0;
+        builder.vertices[t * 3 + k].material = part.triangleMaterials ? part.triangleMaterials[t] : LDR_MATERIALID_INHERIT;
+        builder.vertices[t * 3 + k]._pad = 0;
       }
     }
 
-    bool checkMaterials = part.materials && config.renderpartVertexMaterials;
+    bool checkMaterials = part.triangleMaterials && config.renderpartVertexMaterials;
 
     // first is a vertex merge pass over all compatible edges
     for(uint32_t e = 0; e < mesh.numEdges; e++)
@@ -2165,7 +2380,7 @@ public:
         if((edge.flag & EDGE_HARD_BIT))
           continue;
 
-        bool canMergeMaterial = !(checkMaterials) || (part.materials[triLeft] == part.materials[triLeft]);
+        bool canMergeMaterial = !(checkMaterials) || (part.triangleMaterials[triLeft] == part.triangleMaterials[triLeft]);
 
         bool canMergeAngle = vec_dot(builder.triNormals[triLeft], builder.triNormals[triRight]) >= Loader::FORCED_HARD_EDGE_DOT;
 
@@ -2241,7 +2456,7 @@ public:
         while(mesh.iterateTrianglePairs(edge, nmList, triLeft, triRight))
         {
 
-          bool canMergeMaterial = part.materials[triLeft] == part.materials[triLeft];
+          bool canMergeMaterial = part.triangleMaterials[triLeft] == part.triangleMaterials[triLeft];
           bool canMergeAngle = vec_dot(builder.triNormals[triLeft], builder.triNormals[triRight]) >= Loader::FORCED_HARD_EDGE_DOT;
 
           if(!canMergeMaterial && !canMergeAngle)
@@ -2289,9 +2504,9 @@ public:
 
     // original vtx in / out
 
-    builder.vtxOutInfo.resize(part.num_positions);
+    builder.vtxOutInfo.resize(part.numPositions);
 
-    Loader::TVector<uint32_t> vtxFirstRenderVertex(part.num_positions, LDR_INVALID_IDX);
+    Loader::TVector<uint32_t> vtxFirstRenderVertex(part.numPositions, LDR_INVALID_IDX);
     Loader::TVector<uint32_t> renderVtxFirstTriangle(numVerticesNew, LDR_INVALID_IDX);
 
     for(uint32_t i = 0; i < builder.vertices.size(); i++)
@@ -2320,13 +2535,13 @@ public:
 
     if(config.renderpartChamfer)
     {
-      builder.vtxOutInfo.resize(part.num_positions);
+      builder.vtxOutInfo.resize(part.numPositions);
       builder.vtxOutIndices.resize(numVerticesNew);
       builder.vtxOutEdgePairs.resize(numVerticesNew);
 
       uint32_t base        = 0;
       uint32_t maxOutCount = 0;
-      for(uint32_t i = 0; i < part.num_positions; i++)
+      for(uint32_t i = 0; i < part.numPositions; i++)
       {
         builder.vtxOutInfo[i].begin = base;
         maxOutCount                 = std::max(maxOutCount, builder.vtxOutInfo[i].count);
@@ -2348,7 +2563,7 @@ public:
       Loader::TVector<uint32_t>                            localVertices(maxOutCount, 0);
       Loader::TVector<Loader::BuilderRenderPart::EdgePair> localPairs(maxOutCount);
 
-      for(uint32_t i = 0; i < part.num_positions; i++)
+      for(uint32_t i = 0; i < part.numPositions; i++)
       {
         Loader::BuilderRenderPart::VertexInfo& outInfo = builder.vtxOutInfo[i];
 
@@ -2497,7 +2712,7 @@ public:
 
     builder.vertices.resize(numVerticesNew);
 
-    for(uint32_t i = 0; i < part.num_lines; i++)
+    for(uint32_t i = 0; i < part.numLines; i++)
     {
       uint32_t vertexA = part.lines[i * 2 + 0];
       uint32_t vertexB = part.lines[i * 2 + 1];
@@ -2530,21 +2745,21 @@ public:
     builder.flag = part.flag;
 
     Mesh mesh;
-    mesh.initFull(part.num_positions, part.num_triangles, part.triangles, part.positions, builder.loader);
+    mesh.initFull(part.numPositions, part.numTriangles, part.triangles, part.positions, builder.loader);
 
-    builder.vertices.reserve(part.num_positions + part.num_lines * 2);
-    builder.lines.reserve(part.num_lines * 2);
-    builder.triangles.resize(part.num_triangles * 3, LDR_INVALID_IDX);
+    builder.vertices.reserve(part.numPositions + part.numLines * 2);
+    builder.lines.reserve(part.numLines * 2);
+    builder.triangles.resize(part.numTriangles * 3, LDR_INVALID_IDX);
 
-    builder.triNormals.reserve(part.num_triangles);
+    builder.triNormals.reserve(part.numTriangles);
 
-    for(uint32_t t = 0; t < part.num_triangles; t++)
+    for(uint32_t t = 0; t < part.numTriangles; t++)
     {
       builder.triNormals.push_back(mesh.getTriangleNormal(t, part.positions));
     }
 
     // push "hard" lines
-    for(uint32_t i = 0; i < part.num_lines; i++)
+    for(uint32_t i = 0; i < part.numLines; i++)
     {
       Mesh::Edge* edge = mesh.getEdge(part.lines[i * 2 + 0], part.lines[i * 2 + 1]);
       if(edge)
@@ -3228,7 +3443,7 @@ LdrResult Loader::resolveModel(LdrModelHDL model)
 
   LdrResult result = LDR_SUCCESS;
 
-  for(uint32_t i = 0; i < model->num_instances; i++)
+  for(uint32_t i = 0; i < model->numInstances; i++)
   {
     const LdrInstance& instance = model->instances[i];
     const LdrPart&     part     = getPart(instance.part);
@@ -3237,13 +3452,13 @@ LdrResult Loader::resolveModel(LdrModelHDL model)
       result = part.loadResult;
     }
 
-    if(part.num_shapes || part.num_positions)
+    if(part.numShapes || part.numPositions)
     {
       builder.instances.push_back(instance);
       bbox_merge(builder.bbox, instance.transform, getPart(instance.part).bbox);
     }
     // flatten
-    for(uint32_t s = 0; s < part.num_instances; s++)
+    for(uint32_t s = 0; s < part.numInstances; s++)
     {
       LdrInstance subinstance = part.instances[s];
       if(subinstance.material == LDR_MATERIALID_INHERIT)
@@ -3522,6 +3737,7 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
         if(dotA <= Loader::NO_AREA_TRIANGLE_DOT && dist > Loader::MIN_MERGE_EPSILON)
         {
           uint32_t vidx = (uint32_t)builder.positions.size();
+          uint32_t tidx = (uint32_t)builder.triangles.size() / 3;
           // normalize to ccw
           if(winding == BFC_CW)
           {
@@ -3539,8 +3755,12 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           builder.positions.push_back(vecA);
           builder.positions.push_back(vecB);
           builder.positions.push_back(vecC);
-          builder.materials.push_back(material);
-          builder.quads.push_back(LDR_INVALID_IDX);
+          builder.triangleMaterials.push_back(material);
+
+          LdrNgon ngon;
+          ngon.num   = 1;
+          ngon.index = tidx;
+          builder.triangleNgons.push_back(ngon);
 
           //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecA, vecB)));
           //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecB, vecC)));
@@ -3608,15 +3828,14 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           builder.positions.push_back(vecB);
           builder.positions.push_back(vecC);
           builder.positions.push_back(vecD);
-          builder.materials.push_back(material);
-          builder.materials.push_back(material);
-          builder.quads.push_back(tidx);
-          builder.quads.push_back(tidx);
+          builder.triangleMaterials.push_back(material);
+          builder.triangleMaterials.push_back(material);
 
-          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecA, vecB)));
-          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecB, vecC)));
-          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecC, vecD)));
-          //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecD, vecA)));
+          LdrNgon ngon;
+          ngon.num   = 2;
+          ngon.index = tidx;
+          builder.triangleNgons.push_back(ngon);
+          builder.triangleNgons.push_back(ngon);
         }
       }
       break;
@@ -3798,12 +4017,12 @@ LdrResult Loader::appendSubModel(BuilderModel& builder, Text& txt, const LdrMatr
             {
               const LdrPart& part = getPart(instance.part);
 
-              if(part.num_shapes || part.num_positions)
+              if(part.numShapes || part.numPositions)
               {
                 bbox_merge(builder.bbox, instance.transform, getPart(instance.part).bbox);
               }
               // flatten
-              for(uint32_t s = 0; s < part.num_instances; s++)
+              for(uint32_t s = 0; s < part.numInstances; s++)
               {
                 LdrInstance subinstance = part.instances[s];
                 if(subinstance.material == LDR_MATERIALID_INHERIT)
@@ -3932,7 +4151,7 @@ LdrResult Loader::makeRenderModel(LdrRenderModel& rmodel, LdrModelHDL model, Ldr
   BuilderRenderModel builder;
 
   builder.bbox = model->bbox;
-  for(uint32_t i = 0; i < model->num_instances; i++)
+  for(uint32_t i = 0; i < model->numInstances; i++)
   {
     const LdrInstance&    instance = model->instances[i];
     BuilderRenderInstance rinstance;
@@ -4001,40 +4220,47 @@ public:
     }
   }
 
-  static size_t applyRemap3(size_t numIndices, LdrVertexIndex* indices, LdrMaterialID* materials, uint32_t* quads, const uint32_t* LDR_RESTRICT remap)
+  static size_t applyRemapTriangles(size_t                       numIndices,
+                                    LdrVertexIndex*              indices,
+                                    LdrMaterialID*               triangleMaterials,
+                                    LdrNgon*                     triangleNgons,
+                                    const uint32_t* LDR_RESTRICT remapVertices)
   {
     size_t   outIndices   = 0;
     size_t   outTri       = 0;
     size_t   numTri       = numIndices / 3;
     uint32_t skipped      = 0;
     bool     prevWasValid = false;
-    for(size_t i = 0; i < numTri; i++)
+    for(size_t t = 0; t < numTri; t++)
     {
-      uint32_t      origQuad     = quads[i];
-      LdrMaterialID origMaterial = materials[i];
+      LdrNgon       origNgon     = triangleNgons[t];
+      LdrMaterialID origMaterial = triangleMaterials[t];
       uint32_t      orig[3];
-      orig[0] = indices[i * 3 + 0];
-      orig[1] = indices[i * 3 + 1];
-      orig[2] = indices[i * 3 + 2];
+      orig[0] = indices[t * 3 + 0];
+      orig[1] = indices[t * 3 + 1];
+      orig[2] = indices[t * 3 + 2];
 
       uint32_t newIdx[3];
-      newIdx[0] = remap[orig[0]];
-      newIdx[1] = remap[orig[1]];
-      newIdx[2] = remap[orig[2]];
+      newIdx[0] = remapVertices[orig[0]];
+      newIdx[1] = remapVertices[orig[1]];
+      newIdx[2] = remapVertices[orig[2]];
 
+      // degenerated triangle
       if(newIdx[0] == newIdx[1] || newIdx[1] == newIdx[2] || newIdx[2] == newIdx[0])
       {
+        assert(origNgon.num == 0 || origNgon.num == 2);
+
         // tell other triangle it's no longer a quad
-        if(origQuad != LDR_INVALID_IDX)
+        if(origNgon.num == 2)
         {
           // we are the first, then disable state for next
-          if(origQuad == i)
+          if(origNgon.index == t)
           {
-            quads[i + 1] = LDR_INVALID_IDX;
+            triangleNgons[t + 1] = {};
           }  // we are second, then disable for previous
-          else if(origQuad == i - 1 && prevWasValid)
+          else if(origNgon.index == t - 1 && prevWasValid)
           {
-            quads[outTri - 1] = LDR_INVALID_IDX;
+            triangleNgons[outTri - 1] = {};
           }
         }
 
@@ -4043,11 +4269,15 @@ public:
         continue;
       }
 
-      indices[outIndices + 0] = newIdx[0];
-      indices[outIndices + 1] = newIdx[1];
-      indices[outIndices + 2] = newIdx[2];
-      materials[outTri]       = origMaterial;
-      quads[outTri]           = origQuad == LDR_INVALID_IDX ? LDR_INVALID_IDX : origQuad - skipped;
+      indices[outIndices + 0]   = newIdx[0];
+      indices[outIndices + 1]   = newIdx[1];
+      indices[outIndices + 2]   = newIdx[2];
+      triangleMaterials[outTri] = origMaterial;
+      if(origNgon.num)
+      {
+        origNgon.index -= skipped;
+      }
+      triangleNgons[outTri] = origNgon;
 
       outIndices += 3;
       outTri++;
@@ -4057,7 +4287,7 @@ public:
     return outIndices;
   }
 
-  static size_t applyRemap2(size_t numIndices, LdrVertexIndex* indices, const uint32_t* LDR_RESTRICT remap)
+  static size_t applyRemapLines(size_t numIndices, LdrVertexIndex* indices, const uint32_t* LDR_RESTRICT remapVertices)
   {
     size_t outIndices = 0;
     for(size_t i = 0; i < numIndices / 2; i++)
@@ -4067,8 +4297,8 @@ public:
       orig[1] = indices[i * 2 + 1];
 
       uint32_t newIdx[2];
-      newIdx[0] = remap[orig[0]];
-      newIdx[1] = remap[orig[1]];
+      newIdx[0] = remapVertices[orig[0]];
+      newIdx[1] = remapVertices[orig[1]];
 
       if(newIdx[0] == newIdx[1])
         continue;
@@ -4102,17 +4332,7 @@ public:
   }
 
   template <class Tout>
-  static uint16_t u16_append(LdrRawData& raw, Tout*& ptrRef, size_t num)
-  {
-    assert(num <= 0xFFFF);
-    alignSize(raw, alignof(Tout));
-    ptrRef = (Tout*)raw.size;
-    raw.size += sizeof(Tout) * num;
-    return uint16_t(num);
-  }
-
-  template <class Tout>
-  static uint32_t u32_append(LdrRawData& raw, Tout*& ptrRef, size_t num)
+  static uint32_t append(LdrRawData& raw, Tout*& ptrRef, size_t num)
   {
     assert(num <= 0xFFFFFFFF);
     alignSize(raw, alignof(Tout));
@@ -4122,17 +4342,7 @@ public:
   }
 
   template <class T, class Tout>
-  static uint16_t u16_append(LdrRawData& raw, Tout*& ptrRef, const Loader::TVector<T>& vec, size_t divisor = 1)
-  {
-    assert((vec.size() / divisor) <= 0xFFFF);
-    alignSize(raw, alignof(Tout));
-    ptrRef = (Tout*)raw.size;
-    raw.size += sizeof(Tout) * vec.size();
-    return uint16_t(vec.size() / divisor);
-  }
-
-  template <class T, class Tout>
-  static uint32_t u32_append(LdrRawData& raw, Tout*& ptrRef, const Loader::TVector<T>& vec, size_t divisor = 1)
+  static uint32_t append(LdrRawData& raw, Tout*& ptrRef, const Loader::TVector<T>& vec, size_t divisor = 1)
   {
     assert((vec.size() / divisor) <= 0xFFFFFFFF);
     alignSize(raw, alignof(Tout));
@@ -4208,7 +4418,7 @@ void Loader::appendBuilderPart(BuilderPart& builder, const LdrMatrix& transform,
 {
   assert(flipWinding == false);
   const LdrPart& part = getPart(partid);
-  if(part.num_positions || part.num_shapes)
+  if(part.numPositions || part.numShapes)
   {
     LdrInstance instance;
     instance.material  = material;
@@ -4217,7 +4427,7 @@ void Loader::appendBuilderPart(BuilderPart& builder, const LdrMatrix& transform,
     builder.instances.push_back(instance);
   }
   // flatten sub parts
-  for(uint32_t s = 0; s < part.num_instances; s++)
+  for(uint32_t s = 0; s < part.numInstances; s++)
   {
     LdrInstance subinstance = part.instances[s];
     subinstance.transform   = mat_mul(transform, subinstance.transform);
@@ -4255,14 +4465,14 @@ void Loader::appendBuilderEmbed(BuilderPart& builder, const LdrMatrix& transform
   uint32_t vecOffset   = (uint32_t)builder.positions.size();
   size_t   shapeOffset = (uint32_t)builder.shapes.size();
 
-  builder.positions.reserve(builder.positions.size() + part.num_positions);
+  builder.positions.reserve(builder.positions.size() + part.numPositions);
 
-  builder.lines.reserve(builder.lines.size() + part.num_lines * 2);
-  builder.triangles.reserve(builder.triangles.size() + part.num_triangles * 3);
-  builder.optional_lines.reserve(builder.optional_lines.size() + part.num_optional_lines * 2);
-  builder.quads.reserve(builder.quads.size() + part.num_triangles);
+  builder.lines.reserve(builder.lines.size() + part.numLines * 2);
+  builder.triangles.reserve(builder.triangles.size() + part.numTriangles * 3);
+  builder.optional_lines.reserve(builder.optional_lines.size() + part.numOptionalLines * 2);
+  builder.triangleNgons.reserve(builder.triangleNgons.size() + part.numTriangles);
 
-  for(uint32_t i = 0; i < part.num_positions; i++)
+  for(uint32_t i = 0; i < part.numPositions; i++)
   {
     LdrVector vec = transform_point(transform, part.positions[i]);
     builder.positions.push_back(vec);
@@ -4270,29 +4480,31 @@ void Loader::appendBuilderEmbed(BuilderPart& builder, const LdrMatrix& transform
   }
 
   uint32_t triOffset = builder.triangles.size() / 3;
-  for(uint32_t i = 0; i < part.num_triangles; i++)
+  for(uint32_t i = 0; i < part.numTriangles; i++)
   {
-    builder.quads.push_back(part.quads[i] != LDR_INVALID_IDX ? (part.quads[i] + triOffset) : LDR_INVALID_IDX);
+    LdrNgon ngon = part.triangleNgons[i];
+    ngon.index += triOffset;
+    builder.triangleNgons.push_back(ngon);
   }
 
   if(flipWinding)
   {
-    Utils::pushWithOffsetRev3(builder.triangles, vecOffset, part.num_triangles, part.triangles);
+    Utils::pushWithOffsetRev3(builder.triangles, vecOffset, part.numTriangles, part.triangles);
   }
   else
   {
-    Utils::pushWithOffset(builder.triangles, vecOffset, part.num_triangles * 3, part.triangles);
+    Utils::pushWithOffset(builder.triangles, vecOffset, part.numTriangles * 3, part.triangles);
   }
-  Utils::pushWithOffset(builder.lines, vecOffset, part.num_lines * 2, part.lines);
-  Utils::pushWithOffset(builder.optional_lines, vecOffset, part.num_optional_lines * 2, part.optional_lines);
+  Utils::pushWithOffset(builder.lines, vecOffset, part.numLines * 2, part.lines);
+  Utils::pushWithOffset(builder.optional_lines, vecOffset, part.numOptionalLines * 2, part.optional_lines);
 
-  for(uint32_t i = 0; i < part.num_triangles; i++)
+  for(uint32_t i = 0; i < part.numTriangles; i++)
   {
-    builder.materials.push_back(part.materials[i] == LDR_MATERIALID_INHERIT ? material : part.materials[i]);
+    builder.triangleMaterials.push_back(part.triangleMaterials[i] == LDR_MATERIALID_INHERIT ? material : part.triangleMaterials[i]);
   }
 
   // shapes
-  Utils::copyAppend(builder.shapes, part.num_shapes, part.shapes);
+  Utils::copyAppend(builder.shapes, part.numShapes, part.shapes);
   for(size_t i = shapeOffset; i < builder.shapes.size(); i++)
   {
     builder.shapes[i].bfcInvert ^= flipWinding ? 1 : 0;
@@ -4300,7 +4512,7 @@ void Loader::appendBuilderEmbed(BuilderPart& builder, const LdrMatrix& transform
   }
 
   // flatten sub parts
-  for(uint32_t s = 0; s < part.num_instances; s++)
+  for(uint32_t s = 0; s < part.numInstances; s++)
   {
     LdrInstance subinstance = part.instances[s];
     subinstance.transform   = mat_mul(transform, subinstance.transform);
@@ -4444,16 +4656,17 @@ void Loader::compactBuilderPart(BuilderPart& builder)
 #endif
 #endif
 
-  size_t lineSize = Utils::applyRemap2(builder.lines.size(), builder.lines.data(), remapMerge.data());
-  size_t optionalSize = Utils::applyRemap2(builder.optional_lines.size(), builder.optional_lines.data(), remapMerge.data());
-  size_t triangleSize = Utils::applyRemap3(builder.triangles.size(), builder.triangles.data(), builder.materials.data(),
-                                           builder.quads.data(), remapMerge.data());
+  size_t lineSize = Utils::applyRemapLines(builder.lines.size(), builder.lines.data(), remapMerge.data());
+  size_t optionalSize = Utils::applyRemapLines(builder.optional_lines.size(), builder.optional_lines.data(), remapMerge.data());
+  size_t triangleSize =
+      Utils::applyRemapTriangles(builder.triangles.size(), builder.triangles.data(), builder.triangleMaterials.data(),
+                                 builder.triangleNgons.data(), remapMerge.data());
 
   builder.lines.resize(lineSize);
   builder.optional_lines.resize(optionalSize);
   builder.triangles.resize(triangleSize);
-  builder.materials.resize(triangleSize / 3);
-  builder.quads.resize(triangleSize / 3);
+  builder.triangleMaterials.resize(triangleSize / 3);
+  builder.triangleNgons.resize(triangleSize / 3);
 }
 
 
@@ -4465,14 +4678,14 @@ void Loader::fillBuilderPart(BuilderPart& builder, LdrPartID partid)
   builder.flag          = part.flag;
   builder.bbox          = part.bbox;
   builder.minEdgeLength = part.minEdgeLength;
-  Utils::fillVector(builder.positions, part.positions, part.num_positions);
-  Utils::fillVector(builder.lines, part.lines, part.num_lines * 2);
-  Utils::fillVector(builder.optional_lines, part.optional_lines, part.num_optional_lines * 2);
-  Utils::fillVector(builder.triangles, part.triangles, part.num_triangles * 3);
-  Utils::fillVector(builder.materials, part.materials, part.num_triangles);
-  Utils::fillVector(builder.quads, part.quads, part.num_triangles);
-  Utils::fillVector(builder.instances, part.instances, part.num_instances);
-  Utils::fillVector(builder.shapes, part.shapes, part.num_shapes);
+  Utils::fillVector(builder.positions, part.positions, part.numPositions);
+  Utils::fillVector(builder.lines, part.lines, part.numLines * 2);
+  Utils::fillVector(builder.optional_lines, part.optional_lines, part.numOptionalLines * 2);
+  Utils::fillVector(builder.triangles, part.triangles, part.numTriangles * 3);
+  Utils::fillVector(builder.triangleMaterials, part.triangleMaterials, part.numTriangles);
+  Utils::fillVector(builder.triangleNgons, part.triangleNgons, part.numTriangles);
+  Utils::fillVector(builder.instances, part.instances, part.numInstances);
+  Utils::fillVector(builder.shapes, part.shapes, part.numShapes);
 }
 
 void Loader::fixPart(LdrPartID partid)
@@ -4561,15 +4774,15 @@ void Loader::initPart(LdrPart& part, const BuilderPart& builder)
 
   part.raw.size = 0;
 
-  part.num_positions      = Utils::u32_append(part.raw, part.positions, builder.positions);
-  part.num_lines          = Utils::u32_append(part.raw, part.lines, builder.lines, 2);
-  part.num_optional_lines = Utils::u32_append(part.raw, part.optional_lines, builder.optional_lines, 2);
-  part.num_triangles      = Utils::u32_append(part.raw, part.triangles, builder.triangles, 3);
-  Utils::u32_append(part.raw, part.quads, builder.quads);
-  Utils::u32_append(part.raw, part.materials, builder.materials);
-  part.num_shapes    = Utils::u32_append(part.raw, part.shapes, builder.shapes);
-  part.num_instances = Utils::u32_append(part.raw, part.instances, builder.instances);
-  part.num_name      = Utils::u32_append(part.raw, part.name, builder.filename.size() + 1);
+  part.numPositions     = Utils::append(part.raw, part.positions, builder.positions);
+  part.numLines         = Utils::append(part.raw, part.lines, builder.lines, 2);
+  part.numOptionalLines = Utils::append(part.raw, part.optional_lines, builder.optional_lines, 2);
+  part.numTriangles     = Utils::append(part.raw, part.triangles, builder.triangles, 3);
+  Utils::append(part.raw, part.triangleNgons, builder.triangleNgons);
+  Utils::append(part.raw, part.triangleMaterials, builder.triangleMaterials);
+  part.numShapes    = Utils::append(part.raw, part.shapes, builder.shapes);
+  part.numInstances = Utils::append(part.raw, part.instances, builder.instances);
+  part.numName      = Utils::append(part.raw, part.name, builder.filename.size() + 1);
 
   rawAllocate(part.raw.size, &part.raw);
 
@@ -4577,25 +4790,25 @@ void Loader::initPart(LdrPart& part, const BuilderPart& builder)
   Utils::setup_pointer(part.raw, part.lines, builder.lines);
   Utils::setup_pointer(part.raw, part.optional_lines, builder.optional_lines);
   Utils::setup_pointer(part.raw, part.triangles, builder.triangles);
-  Utils::setup_pointer(part.raw, part.quads, builder.quads);
-  Utils::setup_pointer(part.raw, part.materials, builder.materials);
+  Utils::setup_pointer(part.raw, part.triangleNgons, builder.triangleNgons);
+  Utils::setup_pointer(part.raw, part.triangleMaterials, builder.triangleMaterials);
   Utils::setup_pointer(part.raw, part.shapes, builder.shapes);
   Utils::setup_pointer(part.raw, part.instances, builder.instances);
   Utils::setup_pointer(part.raw, part.name, builder.filename.size() + 1, builder.filename.c_str());
 
 #if _DEBUG && EXTRA_ASSERTS
-  assert(builder.positions.size() == part.num_positions);
-  assert(builder.lines.size() == part.num_lines * 2);
+  assert(builder.positions.size() == part.numPositions);
+  assert(builder.lines.size() == part.numLines * 2);
   for(size_t i = 0; i < builder.lines.size(); i++)
   {
     assert(part.lines[i] <= builder.positions.size());
   }
-  assert(builder.optional_lines.size() == part.num_optional_lines * 2);
+  assert(builder.optional_lines.size() == part.numOptionalLines * 2);
   for(size_t i = 0; i < builder.optional_lines.size(); i++)
   {
     assert(part.optional_lines[i] <= builder.positions.size());
   }
-  assert(builder.triangles.size() == part.num_triangles * 3);
+  assert(builder.triangles.size() == part.numTriangles * 3);
   for(size_t i = 0; i < builder.triangles.size(); i++)
   {
     assert(part.triangles[i] <= builder.positions.size());
@@ -4605,9 +4818,9 @@ void Loader::initPart(LdrPart& part, const BuilderPart& builder)
 
 void Loader::initModel(LdrModel& model, const BuilderModel& builder)
 {
-  model.bbox          = builder.bbox;
-  model.raw.size      = 0;
-  model.num_instances = Utils::u32_append(model.raw, model.instances, builder.instances);
+  model.bbox         = builder.bbox;
+  model.raw.size     = 0;
+  model.numInstances = Utils::append(model.raw, model.instances, builder.instances);
 
   rawAllocate(model.raw.size, &model.raw);
 
@@ -4621,13 +4834,13 @@ void Loader::initRenderPart(LdrRenderPart& renderpart, const BuilderRenderPart& 
   renderpart.bbox        = builder.bbox;
   renderpart.raw.size    = 0;
 
-  renderpart.num_vertices   = Utils::u32_append(renderpart.raw, renderpart.vertices, builder.vertices);
-  renderpart.num_lines      = Utils::u32_append(renderpart.raw, renderpart.lines, builder.lines, 2);
-  renderpart.num_triangles  = Utils::u32_append(renderpart.raw, renderpart.triangles, builder.triangles, 3);
-  renderpart.num_trianglesC = Utils::u32_append(renderpart.raw, renderpart.trianglesC, builder.trianglesC, 3);
-  Utils::u32_append(renderpart.raw, renderpart.materials, renderpart.num_triangles * keepMaterials);
-  Utils::u32_append(renderpart.raw, renderpart.materialsC, renderpart.num_trianglesC * keepMaterials);
-  renderpart.num_shapes = Utils::u32_append(renderpart.raw, renderpart.shapes, part.num_shapes);
+  renderpart.numVertices   = Utils::append(renderpart.raw, renderpart.vertices, builder.vertices);
+  renderpart.numLines      = Utils::append(renderpart.raw, renderpart.lines, builder.lines, 2);
+  renderpart.numTriangles  = Utils::append(renderpart.raw, renderpart.triangles, builder.triangles, 3);
+  renderpart.numTrianglesC = Utils::append(renderpart.raw, renderpart.trianglesC, builder.trianglesC, 3);
+  Utils::append(renderpart.raw, renderpart.triangleMaterials, renderpart.numTriangles * keepMaterials);
+  Utils::append(renderpart.raw, renderpart.materialsC, renderpart.numTrianglesC * keepMaterials);
+  renderpart.numShapes = Utils::append(renderpart.raw, renderpart.shapes, part.numShapes);
 
   rawAllocate(renderpart.raw.size, &renderpart.raw);
 
@@ -4635,16 +4848,16 @@ void Loader::initRenderPart(LdrRenderPart& renderpart, const BuilderRenderPart& 
   Utils::setup_pointer(renderpart.raw, renderpart.lines, builder.lines);
   Utils::setup_pointer(renderpart.raw, renderpart.triangles, builder.triangles);
   Utils::setup_pointer(renderpart.raw, renderpart.trianglesC, builder.trianglesC);
-  Utils::setup_pointer(renderpart.raw, renderpart.materials, part.num_triangles * keepMaterials, part.materials);
+  Utils::setup_pointer(renderpart.raw, renderpart.triangleMaterials, part.numTriangles * keepMaterials, part.triangleMaterials);
   Utils::setup_pointer(renderpart.raw, renderpart.materialsC, builder.materialsC);
-  Utils::setup_pointer(renderpart.raw, renderpart.shapes, part.num_shapes, part.shapes);
+  Utils::setup_pointer(renderpart.raw, renderpart.shapes, part.numShapes, part.shapes);
 }
 
 void Loader::initRenderModel(LdrRenderModel& rmodel, const BuilderRenderModel& builder)
 {
-  rmodel.raw.size      = 0;
-  rmodel.num_instances = Utils::u32_append(rmodel.raw, rmodel.instances, builder.instances.size());
-  rmodel.bbox          = builder.bbox;
+  rmodel.raw.size     = 0;
+  rmodel.numInstances = Utils::append(rmodel.raw, rmodel.instances, builder.instances.size());
+  rmodel.bbox         = builder.bbox;
 
   size_t begin = rmodel.raw.size;
 
@@ -4652,7 +4865,7 @@ void Loader::initRenderModel(LdrRenderModel& rmodel, const BuilderRenderModel& b
 
   Utils::setup_pointer(rmodel.raw, rmodel.instances, 0, true);
 
-  for(uint32_t i = 0; i < rmodel.num_instances; i++)
+  for(uint32_t i = 0; i < rmodel.numInstances; i++)
   {
     const LdrRenderPart& part      = getRenderPart(builder.instances[i].instance.part);
     LdrRenderInstance&   rinstance = rmodel.instances[i];
@@ -4738,7 +4951,7 @@ void Loader::BuilderPart::getCanonicalQuad(uint32_t t, uint32_t quad[4]) const
 {
   assert(isQuad(t));
 
-  uint32_t first  = quads[t];
+  uint32_t first  = triangleNgons[t].index;
   uint32_t second = first + 1;
   quad[0]         = triangles[first * 3 + 0];
   quad[1]         = triangles[first * 3 + 1];

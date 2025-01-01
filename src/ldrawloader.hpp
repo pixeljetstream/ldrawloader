@@ -475,14 +475,14 @@ private:
     TVector<uint32_t>      lines;
     TVector<uint32_t>      optional_lines;
     TVector<uint32_t>      triangles;
-    TVector<uint32_t>      quads;
-    TVector<LdrMaterialID> materials;
+    TVector<LdrNgon>       triangleNgons;
+    TVector<LdrMaterialID> triangleMaterials;
     TVector<LdrShape>      shapes;
     TVector<LdrInstance>   instances;
 
     Loader* loader = nullptr;  // mostly for debugging
 
-    inline bool isQuad(uint32_t t) const { return quads[t] != LDR_INVALID_IDX; }
+    inline bool isQuad(uint32_t t) const { return triangleNgons[t].num != 2; }
     bool        isSameTriangle(uint32_t tA, uint32_t tB) const;
     bool        isSameQuad(uint32_t tA, uint32_t tB) const;
     void        getCanonicalQuad(uint32_t t, uint32_t quad[4]) const;
