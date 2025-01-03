@@ -209,7 +209,7 @@ private:
   // total number of search paths
   static const uint32_t SEARCH_PATHS = 4;
 
-#if 0
+#if 1
   template <typename T>
   using TVector = std::vector<T>;
 #else
@@ -230,6 +230,7 @@ private:
     TVector(uint32_t num, T ref = T()) { resize(num, ref); }
     ~TVector() { reset(); }
     TVector(const TVector<T>& other) { copy(other); }
+    TVector(TVector<T>&& other) { move(other); }
 
     TVector<T>& operator=(const TVector<T>& other)
     {
@@ -482,7 +483,7 @@ private:
 
     Loader* loader = nullptr;  // mostly for debugging
 
-    inline bool isQuad(uint32_t t) const { return triangleNgons[t].num != 2; }
+    inline bool isQuad(uint32_t t) const { return triangleNgons[triangleNgons[t].index].num != 2; }
     bool        isSameTriangle(uint32_t tA, uint32_t tB) const;
     bool        isSameQuad(uint32_t tA, uint32_t tB) const;
     void        getCanonicalQuad(uint32_t t, uint32_t quad[4]) const;
