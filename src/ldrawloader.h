@@ -78,8 +78,6 @@ extern "C" {
   - chamfers can cause edges to be hidden, need to add chamfered lines
   - joining of intersecting/adjacent surfaces to create true solid 
     (very often open-edges are on top of other surfaces)
-  - render linestrip extraction (detection of line curves)
-  - binary cachefile
 ****************************************************/
 
 // if you want to wrap this into dll etc.
@@ -88,7 +86,7 @@ extern "C" {
 #endif
 
 #define LDR_LOADER_VERSION_MAJOR 0
-#define LDR_LOADER_VERSION_MINOR 5
+#define LDR_LOADER_VERSION_MINOR 6
 #define LDR_LOADER_VERSION_CACHE 0
 
 #define LDR_INVALID_ID uint32_t(~0)
@@ -248,7 +246,19 @@ typedef struct LdrPartFlag
 
 typedef struct LdrNgon
 {
-  uint32_t index;
+  // Stored as per-triangle information
+  // 
+  // The seed is the reference triangle that this triangle
+  // belongs to. All triangles of the same ngon share the same seed.
+  // 
+  // A simple triangle has itself as seed.
+  // 
+  // Original quads will be stored as consecutive triangles, where the 
+  // seed is the first of them. 
+  // 
+  // During part fixups (e.g t-junction removal) the ngons may grow,
+  // and then be scattered in the triangle array.
+  uint32_t seed; 
   uint32_t num;
 } LdrNgon;
 

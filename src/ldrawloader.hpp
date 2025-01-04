@@ -148,8 +148,7 @@ public:
   {
     LdrPartID id = LDR_INVALID_ID;
     PartEntry entry;
-    if(findEntry(filename, entry) == LDR_SUCCESS)
-    {
+    if(findEntry(filename, entry) == LDR_SUCCESS) {
       id = entry.partID;
     }
 
@@ -160,8 +159,7 @@ public:
   {
     LdrPartID id = LDR_INVALID_ID;
     PartEntry entry;
-    if(findEntry(filename, entry) == LDR_SUCCESS)
-    {
+    if(findEntry(filename, entry) == LDR_SUCCESS) {
       id = entry.primID;
     }
 
@@ -171,12 +169,10 @@ public:
   inline LdrShapeType findShapeType(const char* filename) const
   {
     const auto it = m_shapeRegistry.find(filename);
-    if(it != m_shapeRegistry.cend())
-    {
+    if(it != m_shapeRegistry.cend()) {
       return it->second;
     }
-    else
-    {
+    else {
       return LDR_INVALID_ID;
     }
   }
@@ -270,8 +266,7 @@ private:
     void resize(uint32_t size, T ref = T())
     {
       reserve(size);
-      for(uint32_t i = m_size; i < size; i++)
-      {
+      for(uint32_t i = m_size; i < size; i++) {
         m_data[i] = ref;
       }
       m_size = size;
@@ -279,8 +274,7 @@ private:
     void clear() { m_size = 0; };
     void reset()
     {
-      if(m_data)
-      {
+      if(m_data) {
         free(m_data);
         m_data     = nullptr;
         m_capacity = 0;
@@ -289,8 +283,7 @@ private:
     };
     void push_back(const T val)
     {
-      if(m_size + 1 > m_capacity)
-      {
+      if(m_size + 1 > m_capacity) {
         uint32_t nextSize = (m_size * 3) / 2;
 
         reserve(nextSize < m_size + 1 ? m_size + 1 : nextSize);
@@ -343,8 +336,7 @@ private:
     void resize(uint32_t numNew, bool value)
     {
       num = numNew;
-      if(num_allocated < numNew)
-      {
+      if(num_allocated < numNew) {
         uint32_t num_old = num_allocated;
         numNew           = (numNew + 63) & ~63;
         num_allocated    = numNew;
@@ -369,12 +361,10 @@ private:
       assert(idx <= num);
       uint64_t mask = (uint64_t(1) << (idx % 64));
       uint64_t old  = data[idx / 64];
-      if(state)
-      {
+      if(state) {
         data[idx / 64] |= mask;
       }
-      else
-      {
+      else {
         data[idx / 64] &= ~mask;
       }
       return (old & mask) != 0;
@@ -396,12 +386,10 @@ private:
       std::atomic_uint64_t* atomic_data = (std::atomic_uint64_t*)data;
       uint64_t              mask        = (uint64_t(1) << (idx % 64));
       uint64_t              old;
-      if(state)
-      {
+      if(state) {
         old = atomic_data[idx / 64].fetch_or(mask, memorder);
       }
-      else
-      {
+      else {
         old = atomic_data[idx / 64].fetch_and(~mask, memorder);
       }
       return (old & mask) != 0;
@@ -435,8 +423,7 @@ private:
 
     ~Text()
     {
-      if(buffer && !referenced)
-      {
+      if(buffer && !referenced) {
         free(buffer);
       }
     }
@@ -483,7 +470,7 @@ private:
 
     Loader* loader = nullptr;  // mostly for debugging
 
-    inline bool isQuad(uint32_t t) const { return triangleNgons[triangleNgons[t].index].num != 2; }
+    inline bool isQuad(uint32_t t) const { return triangleNgons[triangleNgons[t].seed].num != 2; }
     bool        isSameTriangle(uint32_t tA, uint32_t tB) const;
     bool        isSameQuad(uint32_t tA, uint32_t tB) const;
     void        getCanonicalQuad(uint32_t t, uint32_t quad[4]) const;
@@ -589,8 +576,7 @@ private:
       return m;
     else if(m >= MATERIAL_CUSTOM)
       return MATERIAL_ORIGINAL + (m - MATERIAL_CUSTOM);
-    else
-    {
+    else {
       assert(0);
       return 16;
     }
@@ -641,8 +627,7 @@ private:
     std::lock_guard<std::mutex> lockguard(m_partRegistryMutex);
 #endif
     const auto it = m_partRegistry.find(filename);
-    if(it != m_partRegistry.cend())
-    {
+    if(it != m_partRegistry.cend()) {
       entry  = it->second;
       result = LDR_SUCCESS;
     }
@@ -651,6 +636,8 @@ private:
   }
 
 #if LDR_CFG_THREADSAFE
+  // not sure how efficient this is
+
   inline void startPrimitive(LdrPartID primID)
   {
     m_startedPrimitiveLoad.setBit_ts(primID, true, std::memory_order_release);
@@ -685,24 +672,21 @@ private:
 
   inline void waitBuildRender(LdrPartID partid) const
   {
-    while(!m_finishedPartRenderBuild.getBit_ts(partid, std::memory_order_acquire))
-    {
+    while(!m_finishedPartRenderBuild.getBit_ts(partid, std::memory_order_acquire)) {
       std::this_thread::yield();
     }
   }
 
   inline void waitPart(LdrPartID partid) const
   {
-    while(!m_finishedPartLoad.getBit_ts(partid, std::memory_order_acquire))
-    {
+    while(!m_finishedPartLoad.getBit_ts(partid, std::memory_order_acquire)) {
       std::this_thread::yield();
     }
   }
 
   inline void waitPrimitive(LdrPrimitiveID primid) const
   {
-    while(!m_finishedPrimitiveLoad.getBit_ts(primid, std::memory_order_acquire))
-    {
+    while(!m_finishedPrimitiveLoad.getBit_ts(primid, std::memory_order_acquire)) {
       std::this_thread::yield();
     }
   }

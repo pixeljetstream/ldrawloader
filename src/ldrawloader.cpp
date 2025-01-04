@@ -532,9 +532,12 @@ public:
 
   inline void getTriangleBasis(uint32_t t, const LdrVector* positions, LdrVector basis[3]) const
   {
-    basis[0] = vec_normalize(vec_sub(positions[triangles[t * 3 + 0]], positions[triangles[t * 3 + 1]]));
-    basis[2] = getTriangleNormal(t, positions);
-    basis[1] = vec_normalize(vec_cross(basis[0], basis[2]));
+    LdrVector a = positions[triangles[t * 3 + 0]];
+    LdrVector b = positions[triangles[t * 3 + 1]];
+    LdrVector c = positions[triangles[t * 3 + 2]];
+    basis[0]    = vec_normalize(vec_sub(b, a));
+    basis[2]    = getTriangleNormal(t, positions);
+    basis[1]    = vec_normalize(vec_cross(basis[2], basis[0]));
   }
 
   // average of the 3 normals
@@ -1210,7 +1213,7 @@ public:
         builder.triangleMaterials[write] = builder.triangleMaterials[t];
         remap[t]                         = write;
         LdrNgon ngon                     = builder.triangleNgons[t];
-        ngon.index                       = remap[ngon.index];
+        ngon.seed                        = remap[ngon.seed];
         builder.triangleNgons[write]     = ngon;
         write++;
       }
@@ -1442,15 +1445,11 @@ public:
 
   struct NgonTriangulation
   {
-    // current algorithm from here
+    // slightly modified ear-cut based on
     // https://www.flipcode.com/archives/Efficient_Polygon_Triangulation.shtml
-    //
-    // TODO need something that prefers shorter edge lengths
-    // try Triangulate_OPT from https://github.com/ivanfratric/polypartition
 
-
-    uint32_t                   numOutlineVertices = 0;
     Loader::TVector<uint32_t>  workingSet;
+    Loader::TVector<uint32_t>  outlineIndices;
     Loader::TVector<LdrVector> outlineVertices;
     Loader::TVector<uint32_t>  triangleVertices;
     LdrVector                  basis[3];
@@ -1483,20 +1482,26 @@ public:
       return projected;
     }
 
-    inline bool snip(const Loader::BuilderPart& builder, int32_t u, int32_t v, int32_t w, int32_t numPoints)
+    inline bool snip(const Loader::BuilderPart& builder, int32_t u, int32_t v, int32_t w, int32_t numPoints, float& diagonalLength)
     {
-      LdrVector a = outlineVertices[u];
-      LdrVector b = outlineVertices[v];
-      LdrVector c = outlineVertices[w];
+      LdrVector a = outlineVertices[workingSet[u]];
+      LdrVector b = outlineVertices[workingSet[v]];
+      LdrVector c = outlineVertices[workingSet[w]];
 
-      if(0.0000000001f > (((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x))))
+      // triangle must have area
+      // 2d cross product
+      if(0.0000000001f > (((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x)))) {
         return false;
+      }
+      LdrVector ac   = vec_sub(a, c);
+      diagonalLength = vec_length(ac);
 
+      // check if none of the remaining points are within this triangle
       for(int32_t op = 0; op < numPoints; op++) {
         if((op == u) || (op == v) || (op == w))
           continue;
 
-        LdrVector p = outlineVertices[op];
+        LdrVector p = outlineVertices[workingSet[op]];
 
         if(isInsideTriangle(a, b, c, p))
           return false;
@@ -1509,9 +1514,8 @@ public:
     {
       uint32_t numTriangles = builder.triangleNgons[triSeed].num;
 
-
-      workingSet.clear();
-      workingSet.reserve(numTriangles + 4);
+      outlineIndices.clear();
+      outlineIndices.reserve(numTriangles + 2);
       triangleVertices.clear();
       triangleVertices.reserve(numTriangles * 3);
 
@@ -1561,10 +1565,10 @@ public:
         }
 
         if(vtxPreJoin != LDR_INVALID_IDX && vtxPreJoin != vtxLast) {
-          workingSet.push_back(vtxPreJoin);
+          outlineIndices.push_back(vtxPreJoin);
         }
         if(vtxJoin != LDR_INVALID_IDX) {
-          workingSet.push_back(vtxJoin);
+          outlineIndices.push_back(vtxJoin);
           vtxLast = vtxJoin;
         }
 
@@ -1574,51 +1578,66 @@ public:
       // list must come around to seed
       assert(triLast == triSeed);
 
-      numOutlineVertices = uint32_t(workingSet.size());
+      if(outlineIndices.back() == outlineIndices.front())
+        outlineIndices.pop_back();
 
-      outlineVertices.resize(workingSet.size());
+      outlineVertices.resize(outlineIndices.size());
+      workingSet.resize(outlineIndices.size());
 
-      for(uint32_t v = 0; v < numOutlineVertices; v++) {
-        outlineVertices[v] = makeOutlineVertex(builder, workingSet[v]);
+      for(size_t v = 0; v < outlineIndices.size(); v++) {
+        workingSet[v]      = v;
+        outlineVertices[v] = makeOutlineVertex(builder, outlineIndices[v]);
       }
 
       // build new triangles
       {
-        int32_t nv    = int32_t(numOutlineVertices);
-        int32_t count = int32_t(2 * numOutlineVertices);
+        int32_t nv    = int32_t(outlineIndices.size());
+        int32_t count = int32_t(2 * outlineIndices.size());
 
-        for(int32_t m = 0, v = nv - 1; nv > 2;) {
+        for(int32_t v = nv - 1; nv > 2;) {
           if(0 >= (count--)) {
             return;
           }
 
           int32_t u = v;
-          if(nv <= u) {
+          if(u >= nv) {
             u = 0;
           }
           v = u + 1;
-          if(nv <= v) {
+          if(v >= nv) {
             v = 0;
           }
           int32_t w = v + 1;
-          if(nv <= w) {
+          if(w >= nv) {
             w = 0;
           }
-          if(snip(builder, u, v, w, nv)) {
-            uint32_t a = workingSet[u];
-            uint32_t b = workingSet[v];
-            uint32_t c = workingSet[w];
+          float diagonalLength;
+          if(snip(builder, u, v, w, nv, diagonalLength)) {
+
+            // can we snip the next one alternatively, and would it create a shorter diagonal cut
+            float diagonalLengthNext;
+            if(v + 1 <= nv && snip(builder, (u + 1) % nv, (v + 1) % nv, (w + 1) % nv, nv, diagonalLengthNext)
+               && diagonalLengthNext < diagonalLength) {
+              u = (u + 1) % nv;
+              v = (v + 1) % nv;
+              w = (w + 1) % nv;
+            }
+
+            uint32_t wa = workingSet[u];
+            uint32_t wb = workingSet[v];
+            uint32_t wc = workingSet[w];
+
+            uint32_t a = outlineIndices[wa];
+            uint32_t b = outlineIndices[wb];
+            uint32_t c = outlineIndices[wc];
 
             triangleVertices.push_back(a);
             triangleVertices.push_back(b);
             triangleVertices.push_back(c);
 
-            m++;
-
-            int32_t s;
-            int32_t t;
-            for(s = v, t = v + 1; t < nv; s++, t++) {
-              workingSet[s] = workingSet[t];
+            // remove snipped vertex v from working set
+            for(int32_t s = v; s + 1 < nv; s++) {
+              workingSet[s] = workingSet[s + 1];
             }
             nv--;
 
@@ -1628,62 +1647,70 @@ public:
       }
 
       // replace triangles of linked list with new ones
-      if(triangleVertices.size() == numTriangles * 3) {
-        // remove all with old triangulation
-        tri = triSeed;
-        for(uint32_t t = 0; t < numTriangles; t++) {
-          assert(tri != LDR_INVALID_IDX);
+      if(triangleVertices.size() != numTriangles * 3)
+        return;
 
-          // don't flag dead given we will re-add with new topology
-          mesh.removeTriangle(tri);
+      // remove all with old triangulation
+      tri = triSeed;
+      for(uint32_t t = 0; t < numTriangles; t++) {
+        assert(tri != LDR_INVALID_IDX);
 
-          tri = triangleLinkedList[tri];
-        }
-        assert(tri == triSeed || tri == LDR_INVALID_IDX);
+        // don't flag dead given we will re-add with new topology
+        mesh.removeTriangle(tri);
 
-        // add all with new triangulation
-        tri = triSeed;
-        for(uint32_t t = 0; t < numTriangles; t++) {
-          assert(tri != LDR_INVALID_IDX);
+        tri = triangleLinkedList[tri];
+      }
+      assert(tri == triSeed || tri == LDR_INVALID_IDX);
 
-          // replace with new indices
-          builder.triangles[tri * 3 + 0] = triangleVertices[t * 3 + 0];
-          builder.triangles[tri * 3 + 1] = triangleVertices[t * 3 + 1];
-          builder.triangles[tri * 3 + 2] = triangleVertices[t * 3 + 2];
+      // add all with new triangulation
+      tri = triSeed;
+      for(uint32_t t = 0; t < numTriangles; t++) {
+        assert(tri != LDR_INVALID_IDX);
 
-          // add back
-          mesh.addTriangle(tri);
+        // replace with new indices
+        builder.triangles[tri * 3 + 0] = triangleVertices[t * 3 + 0];
+        builder.triangles[tri * 3 + 1] = triangleVertices[t * 3 + 1];
+        builder.triangles[tri * 3 + 2] = triangleVertices[t * 3 + 2];
 
-          tri = triangleLinkedList[tri];
-        }
+        // add back
+        mesh.addTriangle(tri);
+
+        tri = triangleLinkedList[tri];
       }
     }
   };
 
   static bool fixTjunctions(Mesh& mesh, Loader::BuilderPart& builder)
   {
-    bool modified = false;
-
     // removes t-junctions and closable gaps
 
-    uint32_t numVertices = (uint32_t)builder.positions.size();
+    bool modified = false;
 
-    Loader::BitArray processed(mesh.edges.size(), false);
+    // the subdivision of an edge is handled by the "left" triangle
+    Loader::BitArray processedEdges(mesh.edges.size(), false);
 
+    // Each original triangle may be turned into an ngon when we split it.
+    // Original quads are already ngons, but may also get more triangles within.
+    // We will create a linked-list of triangles within the ngon, and the list
+    // will follow the outline of the ngon's triangles in counter-clockwise order.
     Loader::TVector<uint32_t> triangleNgonList(mesh.numTriangles, LDR_INVALID_IDX);
 
     for(uint32_t t = 0; t < mesh.numTriangles; t++) {
       // prior fixing t-junctions only tris and quads exist
       // the second triangle will setup the circular list
       LdrNgon ngon = builder.triangleNgons[t];
-      if(ngon.index != t) {
-        triangleNgonList[t]          = ngon.index;
-        triangleNgonList[ngon.index] = t;
+      if(ngon.seed != t) {
+        triangleNgonList[t]         = ngon.seed;
+        triangleNgonList[ngon.seed] = t;
       }
       else if(ngon.num == 1) {
         triangleNgonList[t] = t;
       }
     }
+    uint32_t numVertices = (uint32_t)builder.positions.size();
+
+    std::vector<uint32_t> path;
+    path.reserve(128);
 
     for(uint32_t v = 0; v < numVertices; v++) {
       bool     respin = false;
@@ -1701,7 +1728,7 @@ public:
 
         // only edges that start from this vertex (so we have canonical winding)
         // don't want to start from vertex whose edge is "reversed"
-        if(processed.getBit(edgeIdxA) || edgeA.vtxA != v || !edgeA.isOpen() || edgeA.isDead())
+        if(processedEdges.getBit(edgeIdxA) || edgeA.vtxA != v || !edgeA.isOpen() || edgeA.isDead())
           continue;
 
         uint32_t triOld = edgeA.triLeft;
@@ -1712,8 +1739,7 @@ public:
         float     lengthA;
         LdrVector vecA = vec_normalize_length(vec_sub(builder.positions[vEnd], posA), lengthA);
 
-        std::vector<uint32_t> path;
-        path.reserve(128);
+        path.clear();
 
         uint32_t vNext          = v;
         uint32_t edgeIdxSkip    = edgeIdxA;
@@ -1731,7 +1757,7 @@ public:
             uint32_t          edgeIdxC = edgeIndicesC[ec];
             const Mesh::Edge& edgeC    = mesh.edges[edgeIndicesC[ec]];
 
-            if(edgeIdxC == edgeIdxSkip || edgeC.isDead() || !edgeC.isOpen() || processed.getBit(edgeIdxC))
+            if(edgeIdxC == edgeIdxSkip || edgeC.isDead() || !edgeC.isOpen() || processedEdges.getBit(edgeIdxC))
               continue;
 
             uint32_t vC = edgeC.otherVertex(vNext);
@@ -1774,7 +1800,7 @@ public:
 
             modified = true;
 
-            processed.resize(mesh.edges.size(), false);
+            processedEdges.resize(mesh.edges.size(), false);
             continue;
           }
         }
@@ -1784,7 +1810,7 @@ public:
 
         modified = true;
 
-        processed.setBit(edgeIdxA, true);
+        processedEdges.setBit(edgeIdxA, true);
 
         uint32_t triIndices[3];
         triIndices[0] = builder.triangles[triOld * 3 + 0];
@@ -1819,12 +1845,12 @@ public:
           triOld = triOld;
 
         LdrNgon ngon = builder.triangleNgons[triOld];
-        ngon         = builder.triangleNgons[ngon.index];
+        ngon         = builder.triangleNgons[ngon.seed];
 
         // append newly added
         ngon.num += uint32_t(path.size()) - 1;
-        builder.triangleNgons[ngon.index] = ngon;
-        builder.triangleNgons[triOld]     = ngon;
+        builder.triangleNgons[ngon.seed] = ngon;
+        builder.triangleNgons[triOld]    = ngon;
 
         uint32_t flagPath = edgeA.flag;
         uint32_t vFirst   = edgeA.vtxA;
@@ -1834,7 +1860,7 @@ public:
         for(size_t i = 0; i < path.size(); i++) {
           uint32_t    edgeIdxC = path[i];
           Mesh::Edge& edgeC    = mesh.edges[edgeIdxC];
-          processed.setBit(edgeIdxC, true);
+          processedEdges.setBit(edgeIdxC, true);
           // inherit edge flag
           edgeC.flag |= flagPath;
 
@@ -1876,7 +1902,7 @@ public:
         if(edgeBCorner)
           edgeBCorner->flag = flagBCorner;
 
-        processed.resize(mesh.edges.size(), false);
+        processedEdges.resize(mesh.edges.size(), false);
         respin = true;
       }
       if(respin) {
@@ -1884,17 +1910,24 @@ public:
       }
     }
 
-#if 0
+    // The triangulation for the t-junction fixups so far was limited to a single source triangle.
+    // However, at the end we may want to leverage the fact that the new triangles form an ngon
+    // (simple polygon) over a original triangle or quad and come up with a better tessellation pattern,
+    // that avoids long skinny triangles, as up to this point we created triangle fans.
     NgonTriangulation ngonTriangulation;
     for(uint32_t t = 0; t < mesh.numTriangles; t++) {
       LdrNgon ngon = builder.triangleNgons[t];
-      if(ngon.num <= 2 || ngon.index != t)
+      // always unify ngon information, as during t-junction fixups only
+      // the seed may contain the correct ngon number of triangles.
+      builder.triangleNgons[t] = builder.triangleNgons[ngon.seed];
+
+      // only seed triangle may start re-triangulation process
+      if(ngon.seed != t || ngon.num <= 2)
         continue;
-      // rebuild triangulation of ngons
 
       ngonTriangulation.build(mesh, builder, t, triangleNgonList.data());
     }
-#endif
+
     return modified;
   }
 
@@ -3489,8 +3522,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           builder.triangleMaterials.push_back(material);
 
           LdrNgon ngon;
-          ngon.num   = 1;
-          ngon.index = tidx;
+          ngon.num  = 1;
+          ngon.seed = tidx;
           builder.triangleNgons.push_back(ngon);
 
           //builder.minEdgeLength = std::min(builder.minEdgeLength, vec_length(vec_sub(vecA, vecB)));
@@ -3557,8 +3590,8 @@ LdrResult Loader::loadData(LdrPart& part, LdrRenderPart& renderPart, const char*
           builder.triangleMaterials.push_back(material);
 
           LdrNgon ngon;
-          ngon.num   = 2;
-          ngon.index = tidx;
+          ngon.num  = 2;
+          ngon.seed = tidx;
           builder.triangleNgons.push_back(ngon);
           builder.triangleNgons.push_back(ngon);
         }
@@ -3932,10 +3965,10 @@ public:
         // tell other triangle it's no longer a quad
         if(origNgon.num == 2) {
           // we are the first, then disable state for next
-          if(origNgon.index == t) {
+          if(origNgon.seed == t) {
             triangleNgons[t + 1] = {};
           }  // we are second, then disable for previous
-          else if(origNgon.index == t - 1 && prevWasValid) {
+          else if(origNgon.seed == t - 1 && prevWasValid) {
             triangleNgons[outTri - 1] = {};
           }
         }
@@ -3950,7 +3983,7 @@ public:
       indices[outIndices + 2]   = newIdx[2];
       triangleMaterials[outTri] = origMaterial;
       if(origNgon.num) {
-        origNgon.index -= skipped;
+        origNgon.seed -= skipped;
       }
       triangleNgons[outTri] = origNgon;
 
@@ -4142,7 +4175,7 @@ void Loader::appendBuilderEmbed(BuilderPart& builder, const LdrMatrix& transform
   uint32_t triOffset = builder.triangles.size() / 3;
   for(uint32_t i = 0; i < part.numTriangles; i++) {
     LdrNgon ngon = part.triangleNgons[i];
-    ngon.index += triOffset;
+    ngon.seed += triOffset;
     builder.triangleNgons.push_back(ngon);
   }
 
@@ -4572,7 +4605,7 @@ void Loader::BuilderPart::getCanonicalQuad(uint32_t t, uint32_t quad[4]) const
 {
   assert(isQuad(t));
 
-  uint32_t first  = triangleNgons[t].index;
+  uint32_t first  = triangleNgons[t].seed;
   uint32_t second = first + 1;
   quad[0]         = triangles[first * 3 + 0];
   quad[1]         = triangles[first * 3 + 1];
@@ -4590,13 +4623,12 @@ void Loader::BuilderPart::getCanonicalQuad(uint32_t t, uint32_t quad[4]) const
 LDR_API void ldrGetDefaultCreateInfo(LdrLoaderCreateInfo* info)
 {
   memset(info, 0, sizeof(LdrLoaderCreateInfo));
-  info->partHiResPrimitives = LDR_FALSE;
-  info->partFixMode         = LDR_PART_FIX_NONE;
-  info->partFixTjunctions   = LDR_TRUE;
-  info->partFixOverlap      = LDR_FALSE;
-  info->renderpartBuildMode = LDR_RENDERPART_BUILD_ONLOAD;
-  info->renderpartChamfer   = 0.35f;
-  //info->renderpartTriangleMaterials = LDR_TRUE;
+  info->partHiResPrimitives       = LDR_FALSE;
+  info->partFixMode               = LDR_PART_FIX_NONE;
+  info->partFixTjunctions         = LDR_TRUE;
+  info->partFixOverlap            = LDR_TRUE;
+  info->renderpartBuildMode       = LDR_RENDERPART_BUILD_ONLOAD;
+  info->renderpartChamfer         = 0.35f;
   info->renderpartVertexMaterials = LDR_TRUE;
 }
 
