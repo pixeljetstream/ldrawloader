@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2019-2024 Christoph Kubisch
+ * Copyright (c) 2019-2025 Christoph Kubisch
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -455,7 +455,7 @@ private:
   struct BuilderPart
   {
     std::string filename;
-    LdrPartFlag flag          = {0, 0};
+    LdrPartFlag flags         = {};
     LdrBbox     bbox          = {{FLT_MAX, FLT_MAX, FLT_MAX}, {-FLT_MAX, -FLT_MAX, -FLT_MAX}};
     float       minEdgeLength = FLT_MAX;
 
@@ -504,8 +504,8 @@ private:
       uint32_t groupCount = 0;
     };
 
-    LdrPartFlag flag = {};
-    LdrBbox     bbox = {{FLT_MAX, FLT_MAX, FLT_MAX}, {-FLT_MAX, -FLT_MAX, -FLT_MAX}};
+    LdrPartFlag flags = {};
+    LdrBbox     bbox  = {{FLT_MAX, FLT_MAX, FLT_MAX}, {-FLT_MAX, -FLT_MAX, -FLT_MAX}};
 
     TVector<LdrRenderVertex> vertices;
     TVector<uint32_t>        lines;

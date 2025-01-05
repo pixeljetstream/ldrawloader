@@ -35,12 +35,12 @@ LdrLoaderCreateInfo  createInfo = {};
 // for renderparts
 createInfo.partFixMode = LDR_PART_FIX_NONE;
 createInfo.renderpartBuildMode = LDR_RENDERPART_BUILD_ONLOAD;
-// required for chamfering
+// can improve quality, though also known to be problematic with high frequency detail models (railways etc.)
 createInfo.partFixTjunctions = LDR_TRUE;
 // optionally look for higher subdivided ldraw primitives
 createInfo.partHiResPrimitives = LDR_FALSE;
 // leave 0 to disable
-createInfo.renderpartChamfer = 0.35f;
+createInfo.renderpartChamfer = 0.2f;
 // installation path of the LDraw Part Library
 createInfo.basePath = m_ldrawPath.c_str(); 
 
@@ -123,9 +123,20 @@ other languages. C++ 11 is required.
 # Acknowledgements
 * The chamfering algorithm is derived from the [Master's Thesis](https://comserv.cs.ut.ee/home/files/Algma_ComputerScience_2018.pdf?study=ATILoputoo&reference=D4FE5BC8A22718CF3A52B308AD2B2B878C78EB36) of [Diana Algma](https://github.com/dianx93)
 * The vertex merging is a modified line-sweep, with sorted vertices along a single vector and was inspired by the algorithm in http://www.assimp.org/
+* N-gon triangulation is a modified version of [Efficient Polygon Triangulation by John Ratcliff](https://www.flipcode.com/archives/Efficient_Polygon_Triangulation.shtml)
+
+# Known Issues
+* The t-junction fixup can be problematic with edges that have a lot of high frequency detail added (e.g. railway nodges)
+* The chamfer/bevel effect can cause artifacts on non-manifold edges (which unfortunately are frequent), or sometimes doesn't account for adjacent triangles that it overlaps into.
+* Hi-res primitives may result in additional artifacts in combination with the other two effects.
 
 # History
-
+- 1/5/2025 Version 0.6:
+  - `LdrNgon` replaces "quads" array
+  - new triangulation of ngons that are result of t-junction fixups
+- 12/29/2024 Version 0.5:
+  - new logic for part fixing to detect coplanar self-overlapping regions that are result of non-manifold edges
+  - some internal refactoring
 - 11/3/2024 Version 0.4: 
   - major overhaul
   - revised non-manifold handling completely, more resililent to non manifold edges

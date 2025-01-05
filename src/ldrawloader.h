@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2019-2024 Christoph Kubisch
+ * Copyright (c) 2019-2025 Christoph Kubisch
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -247,18 +247,18 @@ typedef struct LdrPartFlag
 typedef struct LdrNgon
 {
   // Stored as per-triangle information
-  // 
+  //
   // The seed is the reference triangle that this triangle
   // belongs to. All triangles of the same ngon share the same seed.
-  // 
+  //
   // A simple triangle has itself as seed.
-  // 
-  // Original quads will be stored as consecutive triangles, where the 
-  // seed is the first of them. 
-  // 
+  //
+  // Original quads will be stored as consecutive triangles, where the
+  // seed is the first of them.
+  //
   // During part fixups (e.g t-junction removal) the ngons may grow,
   // and then be scattered in the triangle array.
-  uint32_t seed; 
+  uint32_t seed;
   uint32_t num;
 } LdrNgon;
 
@@ -301,7 +301,7 @@ typedef struct LdrPart
 {
   LdrResult loadResult;
 
-  LdrPartFlag flag;
+  LdrPartFlag flags;
   LdrBbox     bbox;
   float       minEdgeLength;
 
@@ -366,7 +366,7 @@ typedef struct LdrRenderPart
 
   // C suffix stands for chamfered
 
-  LdrPartFlag flag;
+  LdrPartFlag flags;
   LdrBbox     bbox;
 
   uint32_t numVertices;
